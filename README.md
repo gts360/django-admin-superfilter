@@ -1,114 +1,329 @@
-# Superfilter
+# django-admin-superfilter
 
-Generic, modern advanced filter for Django admin changelists.
+Advanced, modern filtering for Django admin changelists, with saved filters and selectable columns.
 
-## What it does
+## Features
 
-- **Modern search-bar UI**: Displays as a clean search bar at the top of changelist.
-- **Filter badges/tags**: Each active filter shows as a blue badge with label, value summary, and remove button.
-- **+ button dropdown**: Click the `+` button to see a dropdown list of all available filterable columns.
-- **Interactive popup modal**: Select a column to open a modern popup where you configure the operator and value.
-- **Type-aware operators**: Different field types have different operator sets (text, numeric, boolean, FK).
-- **Model-field only**: Uses only real model fields from `list_display` (computed methods/callables are ignored).
-- **Relation traversal**: Supports deep field paths like `agent_affecte__carlog_employe_nom`.
-- **Single query parameter**: All filters serialized as JSON in the `sf` URL parameter.
+- Search-bar style filter UI injected into Django admin changelists
+- Type-aware filtering for text, numeric, boolean, choice, date, datetime and relation fields
+- Field path traversal such as `author__email`
+- Saved filters per authenticated user
+- Column selection and ordering persisted with saved filters
+- AJAX-backed relation picker using Django admin Select2 assets
+- Support for custom filter fields via `SuperFilterField`
+- Single JSON query parameter for rules (`sf`) and one for visible columns (`sfc`)
+- Works without templates overrides
 
-## Supported operators
+## Requirements
 
-- **All fields**: `set`, `not_set`
-- **Text fields**: `eq`, `neq`, `contains`, `not_contains`
-- **Numeric/date fields**: `eq`, `neq`, `gt`, `lt`, `gte`, `lte`
-- **Boolean fields**: `true`, `false`, `empty` (NULL)
-- **Foreign key/relation fields**: `in`, `not_in`
+- Python 3.10+
+- Django 4.0+
 
-## Frontend features
+## Installation
 
-- **Search-bar design**: Clean, modern, Material Design-inspired palette (blues)
-- **Badge tags**: Each filter visualized as an inline badge with:
-  - Field label
-  - Value summary (count for FK, truncated text, etc.)
-  - Remove (✕) button
-- **Dropdown column menu**: Click `+` to see all filterable columns with field path hints
-- **Interactive modal popup**:
-  - Slide-up animation on open
-  - Operator selector dropdown
-  - Dynamic value editor (text input, multi-select FK picker, or none)
-  - "Tout selectionner" and "Vider" buttons for FK fields
-  - Dark overlay to focus attention
-- **Smooth animations**: Fade-in badges, slide-down dropdown, slide-up modal
-- **Responsive design**: Works on mobile and tablet
-- **Action buttons**: "Appliquer" (Apply) and "Réinitialiser" (Reset)
+Install the package:
 
-## Frontend stack
-
-- `django.jQuery` from Django admin (native to all Django installs)
-- Admin Select2 AJAX (`admin/js/vendor/select2/select2.full.min.js`)
-- Custom CSS and JS in `superfilter/static/superfilter/`
-
-## Backend stack
-
-- Python type introspection (`django.db.models` field types)
-- Safe field path resolution with traversal support
-- Query builder that generates `Q` objects per rule
-- JSON rule serialization/parsing
-
-## Installation & Usage
-
-```python
-from superfilter.admin import SuperFilterAdminMixin
-
-@admin.register(MyModel)
-class MyModelAdmin(SuperFilterAdminMixin, admin.ModelAdmin):
-    list_display = ("code", "name", "owner", "owner__username", "is_active")
+```bash
+pip install django-admin-superfilter
 ```
 
-**Key points:**
-- Place `SuperFilterAdminMixin` first in the MRO to ensure proper `get_queryset` chaining.
-- Only model fields in `list_display` are filterable.
-- Deep relations like `owner__username` work as long as they resolve to a real field.
-- Computed callables in `list_display` (e.g., `admin.display` decorated methods) are automatically skipped.
+Add the app to `INSTALLED_APPS`:
 
-## Customization
-
-On the mixin, you can override:
-- `superfilter_param_name`: URL query parameter name (default: `sf`)
-- `superfilter_page_size`: FK options per page in AJAX (default: `25`)
-- `superfilter_all_limit`: Max FK options when loading "all" (default: `2000`)
-
-Example:
 ```python
-class MyAdmin(SuperFilterAdminMixin, admin.ModelAdmin):
-    superfilter_all_limit = 5000
-```
-
-## Semantics
-
-- **"Renseigne" / `set`**: Field has a value (not null, not empty string, not false).
-- **"Vide" / `not_set`**: Field is empty (null, empty string, or false).
-- **Boolean "Vide" / `empty`**: Null only (distinct from `false`).
-- **FK "Dans" / `in`**: Selected IDs are included.
-- **FK "Pas dans" / `not_in`**: Selected IDs are excluded.
-- **Text "Contient"**: Case-insensitive substring match (`icontains`).
-
-## URL parameter format
-
-The `sf` parameter is a JSON array of rule objects:
-
-```json
-[
-  { "field": "name", "op": "contains", "value": "test" },
-  { "field": "agent__id", "op": "in", "value": [1, 2, 3] },
-  { "field": "is_active", "op": "true", "value": null }
+INSTALLED_APPS = [
+    # ...
+    "superfilter",
 ]
 ```
 
-Each rule is applied as an AND condition (`Q` objects connected with `&`).
+Run migrations:
 
-## Testing
+```bash
+python manage.py migrate
+```
+
+## Quick start
+
+```python
+from django.contrib import admin
+from superfilter.admin import SuperFilterAdminMixin
+
+from .models import Bird
+
+
+@admin.register(Bird)
+class BirdAdmin(SuperFilterAdminMixin, admin.ModelAdmin):
+    list_display = ("species", "location", "count")
+    search_fields = ("species",)
+```
+
+Important:
+
+- Put `SuperFilterAdminMixin` before `admin.ModelAdmin` in the MRO.
+- By default, filterable fields come from `list_display`.
+- Non-model entries in `list_display` are ignored.
+- Traversed model fields like `location__city__name` are supported.
+
+## What appears in the UI
+
+The package adds a search-bar-like control above the changelist with:
+
+- an add-filter button
+- filter badges for current rules
+- an Apply button
+- a split menu with Save
+- a Reset button
+- a Columns toggle button
+- a collapsible column chooser
+- saved filter chips
+
+Saved filters store both:
+
+- the active filter rules
+- the selected column list and order
+
+## Supported field kinds and operators
+
+### All fields
+
+- `set`
+- `not_set`
+
+### Text-like fields
+
+Text-like fields include `CharField`, `TextField`, `EmailField`, `SlugField`, `URLField`, `UUIDField`.
+
+Operators:
+
+- `set`
+- `not_set`
+- `eq`
+- `neq`
+- `contains`
+- `not_contains`
+- `in`
+- `not_in`
+
+### Numeric fields
+
+Operators:
+
+- `set`
+- `not_set`
+- `eq`
+- `neq`
+- `gt`
+- `lt`
+- `gte`
+- `lte`
+
+### Boolean fields
+
+Operators:
+
+- `set`
+- `not_set`
+- `true`
+- `false`
+
+### Choice fields
+
+Operators:
+
+- `set`
+- `not_set`
+- `in`
+- `not_in`
+
+### Foreign key / relation fields
+
+Operators:
+
+- `set`
+- `not_set`
+- `in`
+- `not_in`
+
+### Date and datetime fields
+
+Operators:
+
+- `set`
+- `not_set`
+- `eq`
+- `before`
+- `after`
+- `between`
+
+## Semantics
+
+- `set` means the field is considered populated
+- `not_set` means the field is empty
+- For text fields, empty means `NULL` or empty string
+- For boolean fields, `set` / `not_set` only target `NULL` vs non-`NULL`
+- `contains` uses `icontains`
+- `not_contains` negates `icontains`
+- `between` on date/datetime expects exactly two values
+- Relation filters use selected related object primary keys
+
+## Configuration
+
+`SuperFilterAdminMixin` exposes a few attributes:
+
+- `superfilter_param_name = "sf"`
+- `superfilter_columns_param_name = "sfc"`
+- `superfilter_fields = None`
+- `superfilter_page_size = 25`
+- `superfilter_all_limit = 2000`
+
+Example:
+
+```python
+class BirdAdmin(SuperFilterAdminMixin, admin.ModelAdmin):
+    list_display = ("species", "location", "count")
+    superfilter_page_size = 50
+    superfilter_all_limit = 5000
+```
+
+## Restricting filterable fields
+
+By default, filterable fields are taken from `list_display`.
+
+To expose a different set of fields, use `superfilter_fields`:
+
+```python
+class BirdAdmin(SuperFilterAdminMixin, admin.ModelAdmin):
+    list_display = ("species", "location", "count")
+    superfilter_fields = ("species", "count", "location__city")
+```
+
+This only affects filterable fields. Column selection still uses `list_display`.
+
+## Custom filter fields
+
+You can plug in custom fields that do not map directly to a Django model field.
+
+Create a subclass of `SuperFilterField`:
+
+```python
+from django.db.models import Q
+from superfilter.logic import SuperFilterField
+
+
+class HasLargeCountField(SuperFilterField):
+    path = "has_large_count"
+    label = "Large count"
+    kind = "choice"
+    choices = [
+        {"value": "yes", "label": "Yes"},
+        {"value": "no", "label": "No"},
+    ]
+
+    def apply_rule(self, queryset, rule):
+        values = set(rule.get("value") or [])
+        if "yes" in values and "no" not in values:
+            return queryset.filter(count__gte=100)
+        if "no" in values and "yes" not in values:
+            return queryset.filter(count__lt=100)
+        return queryset
+```
+
+Register it in `superfilter_fields`:
+
+```python
+class BirdAdmin(SuperFilterAdminMixin, admin.ModelAdmin):
+    list_display = ("species", "location", "count")
+    superfilter_fields = ("species", HasLargeCountField)
+```
+
+## Saved filters
+
+Saved filters are stored in the `SavedSuperFilter` model and are scoped by:
+
+- user
+- app label
+- model name
+- saved filter name
+
+Notes:
+
+- saving requires an authenticated user
+- saved filters are private to the user
+- the latest saved filter with column settings is used as fallback when `sfc` is absent from the querystring
+
+## URL format
+
+Rules are sent in the `sf` query parameter as JSON:
+
+```json
+[
+  {"field": "species", "op": "contains", "value": "owl"},
+  {"field": "location", "op": "in", "value": [1, 2]},
+  {"field": "count", "op": "gte", "value": 10}
+]
+```
+
+Columns are sent in the `sfc` query parameter as JSON:
+
+```json
+["location", "species", "count"]
+```
+
+## Relation option loading
+
+For relation filters, the package exposes an admin endpoint that:
+
+- reuses the related admin's `get_search_results()` when available
+- otherwise falls back to searching up to three text fields
+- otherwise falls back to PK search for numeric terms
+
+## Static assets
+
+The mixin injects:
+
+- `admin/css/vendor/select2/select2.min.css`
+- `admin/js/vendor/select2/select2.full.min.js`
+- `superfilter/superfilter.css`
+- `superfilter/superfilter.js`
+
+No custom template override is required.
+
+## Limitations
+
+- Filtering ignores callable/computed `list_display` entries unless implemented as `SuperFilterField`
+- Column selection only works on entries present in `list_display`
+- Saved filters depend on migrations for the `superfilter` app being applied
+- The package ships with admin-focused frontend assets and is not intended for non-admin pages
+
+## Example project
+
+A runnable sample project is available in:
+
+- `examples/sampleapp/`
+
+Run it with:
+
+```bash
+cd examples/sampleapp
+python manage.py migrate
+python manage.py runserver
+```
+
+## Development
+
+Run tests from the repository root:
 
 ```bash
 python manage.py test superfilter
 ```
 
-Runs logic tests for field introspection, traversal, and operator rule generation.
+Or use the sample project:
 
+```bash
+cd examples/sampleapp
+python manage.py test
+```
+
+## License
+
+MIT. See `LICENCE.md`.
