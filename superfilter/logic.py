@@ -211,6 +211,7 @@ def list_filterable_fields(model_admin, request, source_fields=None) -> list[Fil
         filter_field, _custom = build_filter_field_from_item(model_admin, request, item)
         if filter_field is not None:
             out.append(filter_field)
+    out.sort(key=lambda ff: ff.label)
     return out
 
 
