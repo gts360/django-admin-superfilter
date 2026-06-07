@@ -192,7 +192,7 @@ def build_filter_field_from_item(model_admin, request, item):
     except FieldDoesNotExist:
         return None, None
     kind = get_field_kind(field)
-    label = str(getattr(field, "verbose_name", item)).strip().capitalize()
+    label = str(getattr(field, "verbose_name", item)).strip()
     return (
         FilterField(
             path=item,
