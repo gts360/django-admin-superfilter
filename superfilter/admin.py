@@ -42,6 +42,9 @@ class SuperFilterAdminMixin(admin.ModelAdmin):
         self._orig_get_list_display = self.get_list_display
         self.get_list_display = self.patched_get_list_display
 
+        self._orig_get_queryset = self.get_queryset
+        self.get_queryset = self.patched_get_queryset
+
     class Media:
         css = {
             "all": (
@@ -326,8 +329,8 @@ class SuperFilterAdminMixin(admin.ModelAdmin):
             return JsonResponse({'error': 'Filtre introuvable'}, status=404)
         return JsonResponse({'savedFilters': self._get_saved_filters_payload(request)})
 
-    def get_queryset(self, request):
-        qs = super().get_queryset(request)
+    def patched_get_queryset(self, request):
+        qs = self._orig_get_queryset(request)
         rules = parse_rules(request.GET.get(self.superfilter_param_name))
         if not rules:
             return qs
