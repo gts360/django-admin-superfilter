@@ -34,6 +34,14 @@ class SuperFilterAdminMixin(admin.ModelAdmin):
     superfilter_page_size = 25
     superfilter_all_limit = 2000
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Monkey patch get_list_display as overriding does not catch
+        # The case where subclass does not relay on super().get_list_display() and respect it.
+        self._orig_get_list_display = self.get_list_display
+        self.get_list_display = self.patched_get_list_display
+
     class Media:
         css = {
             "all": (
@@ -73,7 +81,7 @@ class SuperFilterAdminMixin(admin.ModelAdmin):
         return custom_urls + urls
 
     def get_superfilter_default_list_display(self, request):
-        return tuple(super().get_list_display(request))
+        return list(self._orig_get_list_display(request))
 
     def _normalize_selected_columns(self, requested_columns, available_columns):
         available = [str(col) for col in available_columns]
@@ -122,8 +130,8 @@ class SuperFilterAdminMixin(admin.ModelAdmin):
 
         return list(available_columns)
 
-    def get_list_display(self, request):
-        return tuple(self.get_superfilter_selected_columns(request))
+    def patched_get_list_display(self, request):
+        return list(self.get_superfilter_selected_columns(request))
 
     def get_superfilter_source_fields(self, request):
         source_fields = self.superfilter_fields
