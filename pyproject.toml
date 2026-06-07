@@ -1,0 +1,35 @@
+[project]
+name = "django-admin-superfilter"
+version = "0.9.0"
+description = "TODO"
+authors = [
+    {name = "Omar BENHAMID",email = "omar.benhamid@smart-gts.com"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+homepage = "https://github.com/omarbenhamid/django-admin-superfilter"
+repository = "https://github.com/omarbenhamid/django-admin-superfilter"
+documentation = "https://github.com/omarbenhamid/django-admin-superfilter"
+keywords = ["django", "admin", "filter", "tools"]
+requires-python = ">=3.10"
+dependencies = [
+    "django (>=4.0)",
+]
+classifiers = [
+    "Framework :: Django",
+    "Framework :: Django :: 4",
+    "Framework :: Django :: 5",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[[tool.poetry.packages]]
+include = "superfilter"
+[tool.poetry.group.dev.dependencies]
+pytest-django = "^4.11.1"
+uvicorn = "^0.34.3"
+
