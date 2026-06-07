@@ -27,7 +27,7 @@ class SuperFilterChangeList(ChangeList):
         return lookup_params
 
 
-class SuperFilterAdminMixin(admin.ModelAdmin):
+class SuperFilterAdminMixin:
     superfilter_param_name = "sf"
     superfilter_columns_param_name = "sfc"
     superfilter_fields = None
