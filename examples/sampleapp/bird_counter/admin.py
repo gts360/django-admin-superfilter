@@ -1,12 +1,13 @@
 from django.contrib import admin
 
+from superfilter.admin import SuperFilterAdminMixin
 from .models import Bird, City, Location
 
 
 # Register your models here.
 
 @admin.register(Bird)
-class BirdAdmin(admin.ModelAdmin):
+class BirdAdmin(SuperFilterAdminMixin, admin.ModelAdmin):
     list_display = ('species', 'location', 'count')
     search_fields = ('species',)
     ordering = ('species',)

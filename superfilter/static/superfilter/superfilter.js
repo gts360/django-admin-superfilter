@@ -71,7 +71,7 @@
         columnsToggle.appendChild(iconButtonContent('columns', 'Colonnes'));
         bar.appendChild(columnsToggle);
         container.appendChild(bar);
-        target.insertBefore(container, target.firstChild);
+        target.before(container);
     }
 
     function removeLoadingShell() {
@@ -172,7 +172,7 @@
             removeLoadingShell();
             this.container = el("div", { class: "superfilter-container" });
             this.buildSearchBar();
-            target.insertBefore(this.container, target.firstChild);
+            target.before(this.container);
         }
 
         buildSearchBar() {
