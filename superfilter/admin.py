@@ -122,15 +122,6 @@ class SuperFilterAdminMixin:
         if requested is not None:
             return self._normalize_selected_columns(requested, available_columns)
 
-        if getattr(request, 'user', None) and request.user.is_authenticated:
-            saved = SavedSuperFilter.objects.filter(
-                user=request.user,
-                app_label=self.opts.app_label,
-                model_name=self.opts.model_name,
-            ).order_by('-updated_at', '-created_at', '-id').first()
-            if saved and saved.columns:
-                return self._normalize_selected_columns(saved.columns, available_columns)
-
         return list(available_columns)
 
     def patched_get_list_display(self, request):
