@@ -1,10 +1,14 @@
 import json
+import logging
 from dataclasses import dataclass, field as dataclass_field
-from typing import Any
+from typing import Any, Type
 
+from django.contrib import messages
 from django.core.exceptions import FieldDoesNotExist, ValidationError
 from django.db import models
-from django.db.models import Q
+from django.db.models import Q, Field
+
+logger = logging.getLogger(__name__)
 
 TEXT_FIELDS = (
     models.CharField,
@@ -46,17 +50,23 @@ class FilterField:
 class SuperFilterField:
     path: str
     label: str
-    kind: str = 'all'
+    kind: str | None = 'all'
     choices: list[dict[str, Any]] | None = None
     input_type: str | None = None
+    input_field: Field | Type[Field] | None = None
+    # If set it can be used to apply the filter, supposing that path is annotated in the base queryset.
+    # ex. input_filed = models.BooleanField
 
-    def __init__(self, path: str | None = None, label: str | None = None, kind: str | None = None):
+    def __init__(self, path: str | None = None, label: str | None = None,
+                 kind: str | None = None, input_field: Field | None = None):
         if path is not None:
             self.path = path
         if label is not None:
             self.label = label
         if kind is not None:
             self.kind = kind
+        if input_field is not None:
+            self.input_field = input_field
 
     def to_filter_field(self) -> FilterField:
         return FilterField(
@@ -68,7 +78,10 @@ class SuperFilterField:
         )
 
     def apply_rule(self, queryset, rule: dict[str, Any]):
-        raise ValidationError(f"Custom field '{self.path}' does not implement filtering")
+        if self.input_field:
+            field = self.input_field if isinstance(self.input_field, Field) else self.input_field()
+            return queryset.filter(_q_for_rule(self.path, field, rule.get("op"), rule.get("value")))
+        raise ValidationError(f"Custom field '{self.path}' does not implement filtering and input_field not set.")
 
 
 OPERATORS_BY_KIND = {
@@ -350,7 +363,7 @@ def _q_for_rule(path: str, field, op: str, value: Any) -> Q:
     raise ValidationError(f"Unknown operator '{op}'")
 
 
-def apply_rules(queryset, model: type[models.Model], allowed_fields: set[str], rules: list[dict[str, Any]], custom_fields: dict[str, SuperFilterField] | None = None):
+def apply_rules(request, queryset, model: type[models.Model], allowed_fields: set[str], rules: list[dict[str, Any]], custom_fields: dict[str, SuperFilterField] | None = None):
     custom_fields = custom_fields or {}
     qs = queryset
     q = Q()
@@ -363,14 +376,17 @@ def apply_rules(queryset, model: type[models.Model], allowed_fields: set[str], r
         if custom_field is not None:
             try:
                 qs = custom_field.apply_rule(qs, rule)
-            except (ValidationError, TypeError, ValueError):
-                continue
+            except (ValidationError, TypeError, ValueError) as e:
+                messages.add_message(request, messages.ERROR, f"Erreur d'application du filtre pour {path}: {str(e)}")
+                logger.debug("Exception applying filter", exc_info=True)
             continue
 
         try:
             field = resolve_model_field(model, path)
             q &= _q_for_rule(path, field, rule.get("op"), rule.get("value"))
-        except (FieldDoesNotExist, ValidationError, TypeError, ValueError):
+        except (FieldDoesNotExist, ValidationError, TypeError, ValueError) as e:
+            messages.add_message(request, messages.ERROR, f"Erreur d'application du filtre pour {path}: {str(e)}")
+            logger.debug("Exception applying filter", exc_info=True)
             continue
 
     return qs.filter(q)

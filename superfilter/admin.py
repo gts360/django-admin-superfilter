@@ -332,7 +332,7 @@ class SuperFilterAdminMixin:
         rules = parse_rules(request.GET.get(self.superfilter_param_name))
         if not rules:
             return qs
-        return apply_rules(
+        return apply_rules(request,
             qs,
             self.model,
             self.get_superfilter_allowed_field_paths(request),
