@@ -242,6 +242,15 @@
             const applyBtn = el("button", { type: "button", class: "superfilter-btn primary superfilter-split-main", disabled: 'disabled' }, "Appliquer");
             const menuBtn = el("button", { type: "button", class: "superfilter-btn primary superfilter-split-toggle", }, "▾");
             const applyDropdown = el("div", { class: "superfilter-apply-menu", style: "display:none;" });
+            if(this.meta.exportXLSXUrl) {
+              const exportBtn = el("button", { type: "button", class: "superfilter-apply-menu-item"}, "Télécharger");
+              exportBtn.addEventListener("click", () => {
+                this.export();
+              });
+              applyDropdown.appendChild(exportBtn);
+            } else {
+              const exportBtn = null;
+            }
             const saveBtn = el("button", { type: "button", class: "superfilter-apply-menu-item" }, "Enregistrer");
             const resetBtn = el('button', { type: 'button', class: 'superfilter-btn superfilter-icon-btn', title: 'Réinitialiser', 'aria-label': 'Réinitialiser' });
             resetBtn.appendChild(iconButtonContent('reload', 'Réinitialiser'));
@@ -939,6 +948,41 @@
             this.lastAppliedColumns = normalizeColumns(this.getSelectedColumns());
             this.updateApplyButtonState();
             form.submit();
+        }
+
+        export() {
+            const form = document.querySelector("#changelist-search") ||
+                         document.querySelector("form#changelist-form") ||
+                         document.querySelector("#changelist-form") ||
+                         document.querySelector("form");
+            if (!form) return;
+
+            const origAction = form.action;
+            const origMethod = form.method;
+
+            // Set form action to this.meta.exportXLSXUrl and GET
+            form.action = joinUrl(getChangeListBasePath(), this.meta.exportXLSXUrl);
+            form.method = "GET";
+
+            let hidden = form.querySelector(`input[name='${this.meta.param}']`);
+            if (!hidden) {
+                hidden = el("input", { type: "hidden", name: this.meta.param });
+                form.appendChild(hidden);
+            }
+            hidden.value = JSON.stringify(this.rules);
+
+            let columnsHidden = form.querySelector(`input[name='${this.meta.columnsParam}']`);
+            if (!columnsHidden) {
+                columnsHidden = el("input", { type: "hidden", name: this.meta.columnsParam });
+                form.appendChild(columnsHidden);
+            }
+            columnsHidden.value = JSON.stringify(this.getSelectedColumns());
+
+            form.submit();
+            setTimeout(() => {
+              form.action = origAction;
+              form.method = origMethod;
+            }, 0)
         }
 
         reset() {

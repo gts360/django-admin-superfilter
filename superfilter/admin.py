@@ -1,9 +1,14 @@
 from django.contrib import admin
+from django.contrib.admin.templatetags.admin_list import result_headers
+from django.contrib.admin.utils import lookup_field, display_for_field, display_for_value
 from django.contrib.admin.views.main import ChangeList
 from django.core.exceptions import FieldDoesNotExist
 from django.db import models
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from django.urls import path
+from django.utils.encoding import force_str
+from django.utils.html import strip_tags
+from openpyxl.workbook import Workbook
 
 from superfilter.logic import (
     apply_rules,
@@ -33,6 +38,7 @@ class SuperFilterAdminMixin:
     superfilter_fields = None
     superfilter_page_size = 25
     superfilter_all_limit = 2000
+    superfilter_export_xlsx = True
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -80,6 +86,11 @@ class SuperFilterAdminMixin:
                 self.admin_site.admin_view(self.superfilter_delete_view),
                 name=f"{self.opts.app_label}_{self.opts.model_name}_superfilter_delete",
             ),
+            path(
+                "superfilter/export-xlsx/",
+                self.admin_site.admin_view(self.export_changelist_xlsx_view),
+                name=f"{self.model._meta.app_label}_{self.model._meta.model_name}_export_xlsx",
+            )
         ]
         return custom_urls + urls
 
@@ -201,6 +212,7 @@ class SuperFilterAdminMixin:
                 "selectedColumns": [self._colname(col) for col in self.get_superfilter_selected_columns(request)],
                 "fkOptionsUrl": "superfilter/fk-options/",
                 "saveUrl": "superfilter/save/",
+                "exportXLSXUrl": "superfilter/export-xlsx/" if self.superfilter_export_xlsx else None,
                 "deleteUrlTemplate": "superfilter/delete/__ID__/",
                 "savedFilters": self._get_saved_filters_payload(request),
             }
@@ -326,6 +338,83 @@ class SuperFilterAdminMixin:
         if not deleted:
             return JsonResponse({'error': 'Filtre introuvable'}, status=404)
         return JsonResponse({'savedFilters': self._get_saved_filters_payload(request)})
+
+    def export_changelist_xlsx_view(self, request):
+        """
+        Export the same admin changelist:
+        - same filters
+        - same search
+        - same ordering
+        - same list_display columns
+        - same admin column titles
+        """
+
+        cl = self.get_changelist_instance(request)
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Changelist"
+
+        headers = [
+            strip_tags(force_str(header["text"]))
+            for header in result_headers(cl)
+        ]
+        ws.append(headers)
+
+        for obj in cl.result_list:
+            ws.append([
+                self._excel_value(request, obj, field_name)
+                for field_name in cl.list_display
+            ])
+
+        response = HttpResponse(
+            content_type=(
+                "application/vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet"
+            )
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="{request.GET.get("filename", "export.xlsx")}"'
+        )
+        wb.save(response)
+        return response
+
+    def _excel_value(self, request, obj, field_name):
+        """
+        Similar spirit to Django admin's rendering resolution:
+        field -> callable -> ModelAdmin attr -> model attr.
+        """
+
+        try:
+            field, attr, value = lookup_field(field_name, obj, self)
+        except Exception as exc:
+            return f"#ERROR: {exc}"
+
+        if field is None:
+            if callable(value):
+                value = value(obj)
+            return self._clean_excel_value(value)
+
+        try:
+            value = getattr(obj, field_name)
+        except Exception:
+            pass
+
+        if field.choices:
+            value = display_for_field(value, field, empty_value_display="")
+        else:
+            value = display_for_value(value, empty_value_display="")
+
+        return self._clean_excel_value(value)
+
+    def _clean_excel_value(self, value):
+        if value is None:
+            return ""
+
+        # Removes HTML from @admin.display methods returning format_html(...)
+        value = strip_tags(force_str(value))
+
+        return value
 
     def patched_get_queryset(self, request):
         qs = self._orig_get_queryset(request)

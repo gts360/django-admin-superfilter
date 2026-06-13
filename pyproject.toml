@@ -14,6 +14,7 @@ keywords = ["django", "admin", "filter", "tools"]
 requires-python = ">=3.10"
 dependencies = [
     "django (>=4.0)",
+    "openpyxl (>=3.1.5)"
 ]
 classifiers = [
     "Framework :: Django",
