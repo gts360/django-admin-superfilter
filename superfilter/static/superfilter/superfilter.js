@@ -43,7 +43,7 @@
     }
 
     function getMountTarget() {
-        return document.querySelector("#changelist") || document.querySelector("#content-main");
+        return document.querySelector("#changelist");
     }
 
     function renderLoadingShell() {
