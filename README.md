@@ -249,7 +249,6 @@ Notes:
 
 - saving requires an authenticated user
 - saved filters are private to the user
-- the latest saved filter with column settings is used as fallback when `sfc` is absent from the querystring
 
 ## URL format
 
@@ -292,7 +291,6 @@ No custom template override is required.
 
 - Filtering ignores callable/computed `list_display` entries unless implemented as `SuperFilterField`
 - Column selection only works on entries present in `list_display`
-- Saved filters depend on migrations for the `superfilter` app being applied
 - The package ships with admin-focused frontend assets and is not intended for non-admin pages
 
 ## Example project

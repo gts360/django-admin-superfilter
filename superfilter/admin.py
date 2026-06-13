@@ -86,18 +86,23 @@ class SuperFilterAdminMixin:
     def get_superfilter_default_list_display(self, request):
         return list(self._orig_get_list_display(request))
 
+    @staticmethod
+    def _colname(coldef):
+        # Extract string id of column (as list_display supports also callables and uses __name__ to identify them)
+        return coldef.__name__ if hasattr(coldef, '__name__') else str(coldef)
+
     def _normalize_selected_columns(self, requested_columns, available_columns):
-        available = [str(col) for col in available_columns]
+        available = { self._colname(col): col for col in available_columns }
         selected = [str(col) for col in (requested_columns or []) if str(col) in available]
         if not selected:
-            return available
+            return available_columns
         ordered = []
         seen = set()
         for col in selected:
             if col not in seen:
-                ordered.append(col)
+                ordered.append(available[col])
                 seen.add(col)
-        return ordered or available
+        return ordered or available_columns
 
     def parse_superfilter_columns(self, raw_columns):
         if not raw_columns:
@@ -145,7 +150,7 @@ class SuperFilterAdminMixin:
     def _serialize_column_options(self, request):
         return [
             {
-                'path': str(item),
+                'path': self._colname(item),
                 'label': self.get_column_label(item),
             }
             for item in self.get_superfilter_default_list_display(request)
@@ -154,6 +159,8 @@ class SuperFilterAdminMixin:
     def get_column_label(self, item):
         if item == '__str__':
             return str(self.model._meta.verbose_name).capitalize()
+        if hasattr(item, 'short_description'):
+            return item.short_description
         try:
             return str(self.get_changelist_instance_label(item))
         except Exception:
@@ -191,7 +198,7 @@ class SuperFilterAdminMixin:
                 "fields": serialize_fields(fields),
                 "rules": parse_rules(request.GET.get(self.superfilter_param_name)),
                 "columns": self._serialize_column_options(request),
-                "selectedColumns": self.get_superfilter_selected_columns(request),
+                "selectedColumns": [self._colname(col) for col in self.get_superfilter_selected_columns(request)],
                 "fkOptionsUrl": "superfilter/fk-options/",
                 "saveUrl": "superfilter/save/",
                 "deleteUrlTemplate": "superfilter/delete/__ID__/",

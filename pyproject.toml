@@ -1,7 +1,7 @@
 [project]
 name = "django-admin-superfilter"
-version = "0.9.0"
-description = "TODO"
+version = "0.9.1"
+description = "Advanced, modern filtering for Django admin changelists, with saved filters and selectable columns."
 authors = [
     {name = "Omar BENHAMID",email = "omar.benhamid@smart-gts.com"}
 ]
