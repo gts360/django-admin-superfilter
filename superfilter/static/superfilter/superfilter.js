@@ -9,6 +9,7 @@
         columns: '/static/superfilter/icons/columns.svg',
         reload: '/static/superfilter/icons/reload.svg',
         trash: '/static/superfilter/icons/trash.svg',
+        download: '/static/superfilter/icons/download.svg',
         close: '/static/superfilter/icons/x-close.svg',
     };
 
@@ -305,6 +306,15 @@
         createSavedTag(saved, compact = false) {
             const tag = el('div', { class: `superfilter-saved-tag-wrap${compact ? ' compact' : ''}` });
             const applyBtn = el('button', { type: 'button', class: `superfilter-saved-tag${compact ? ' compact' : ''}` }, saved.name);
+            let exportBtn = null;
+            if(this.meta.exportXLSXUrl) {
+              const payload = new URLSearchParams();
+              payload.append(this.meta.param, JSON.stringify(this.rules));
+              payload.append(this.meta.columnsParam, JSON.stringify(this.getSelectedColumns()));
+              exportBtn = el('a', { href: getChangeListBasePath() + this.meta.exportXLSXUrl + "?" + payload.toString() , class: `superfilter-saved-tag-export${compact ? ' compact' : ''}`, target: '_blank'});
+              exportBtn.appendChild(iconButtonContent('download', 'Telecharger'))
+            }
+
             const deleteBtn = el('button', { type: 'button', class: 'superfilter-saved-tag-remove', title: 'Supprimer', 'aria-label': 'Supprimer' });
             deleteBtn.appendChild(iconButtonContent('trash', 'Supprimer'));
 
@@ -320,6 +330,8 @@
             });
 
             tag.appendChild(applyBtn);
+            if(exportBtn)
+              tag.appendChild(exportBtn);
             tag.appendChild(deleteBtn);
             return tag;
         }

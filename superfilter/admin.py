@@ -6,6 +6,7 @@ from django.core.exceptions import FieldDoesNotExist
 from django.db import models
 from django.http import JsonResponse, HttpResponse
 from django.urls import path
+from django.utils import timezone
 from django.utils.encoding import force_str
 from django.utils.html import strip_tags
 from openpyxl.workbook import Workbook
@@ -374,7 +375,7 @@ class SuperFilterAdminMixin:
             )
         )
         response["Content-Disposition"] = (
-            f'attachment; filename="{request.GET.get("filename", "export.xlsx")}"'
+            f'attachment; filename="{cl.opts.verbose_name}-export-{timezone.now().isoformat(timespec="minutes")}.xlsx"'
         )
         wb.save(response)
         return response
