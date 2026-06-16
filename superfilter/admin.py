@@ -349,7 +349,7 @@ class SuperFilterAdminMixin:
         - same list_display columns
         - same admin column titles
         """
-
+        self.list_per_page = 5000
         cl = self.get_changelist_instance(request)
 
         wb = Workbook()
