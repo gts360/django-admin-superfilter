@@ -229,7 +229,7 @@ class SuperFilterAdminMixin:
     def _get_related_queryset(self, request, related_model, term: str):
         qs = related_model._default_manager.all()
         related_admin = self.admin_site._registry.get(related_model)
-        if related_admin and term:
+        if related_admin and related_admin.get_search_fields(request) and term:
             qs, _ = related_admin.get_search_results(request, qs, term)
         elif term:
             text_fields = [

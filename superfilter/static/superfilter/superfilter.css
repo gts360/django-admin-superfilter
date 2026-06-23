@@ -593,7 +593,7 @@ textarea.superfilter-input {
 }
 
 .superfilter-loading {
-    opacity: 0.75;
+    opacity: 0.50;
 }
 
 .superfilter-searchbar-loading {

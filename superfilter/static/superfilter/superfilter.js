@@ -919,7 +919,7 @@
             const rulesDirty = normalizeRules(this.rules) !== this.lastAppliedRules;
             const columnsDirty = normalizeColumns(this.getSelectedColumns()) !== this.lastAppliedColumns;
             const isDirty = rulesDirty || columnsDirty;
-            this.applyBtn.disabled = !isDirty;
+            if(isDirty) this.apply();
             if (this.resetBtn) {
                 this.resetBtn.disabled = !isDirty && !this.rules.length && !this.isColumnCustomizationApplied();
             }
@@ -958,7 +958,7 @@
 
             this.lastAppliedRules = normalizeRules(this.rules);
             this.lastAppliedColumns = normalizeColumns(this.getSelectedColumns());
-            this.updateApplyButtonState();
+            this.container.classList.add('superfilter-loading');
             form.submit();
         }
 
