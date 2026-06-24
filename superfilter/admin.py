@@ -308,7 +308,7 @@ class SuperFilterAdminMixin:
             app_label=self.opts.app_label,
             model_name=self.opts.model_name,
             name=name,
-            defaults={'rules': rules, 'columns': columns},
+            defaults={'rules': rules, 'columns': [self._colname(c) for c in columns]}
         )
         return JsonResponse(
             {
