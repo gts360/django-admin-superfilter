@@ -754,6 +754,65 @@
                 }
 
                 if (field.kind === "choice") {
+                    // If the field carries an autocomplete URL, use Select2 ajax directly.
+                    if (field.autocompleteUrl) {
+                        const select = el("select", { class: "superfilter-select", multiple: "multiple" });
+                        valueContainer.appendChild(select);
+
+                        const tools = el("div", { style: "margin-top:10px; display:flex; gap:8px;" });
+                        const selectAllBtn = el("button", { type: "button", class: "superfilter-btn" }, "Tout selectionner");
+                        const clearBtn = el("button", { type: "button", class: "superfilter-btn" }, "Vider");
+                        tools.appendChild(selectAllBtn);
+                        tools.appendChild(clearBtn);
+                        valueContainer.appendChild(tools);
+
+                        const acUrl = field.autocompleteUrl;
+                        if ($.fn.select2) {
+                            $(select).select2({
+                                width: "100%",
+                                dropdownParent: $(modal),
+                                ajax: {
+                                    url: acUrl,
+                                    delay: 200,
+                                    data: params => ({ q: params.term || "", page: params.page || 1 }),
+                                    processResults: data => ({
+                                        results: data.results || [],
+                                        pagination: data.pagination || { more: false }
+                                    })
+                                }
+                            });
+                        }
+
+                        selectAllBtn.addEventListener("click", () => {
+                            const url = new URL(acUrl, window.location.origin);
+                            url.searchParams.set("initialValue", "true");
+                            $.getJSON(url.toString(), data => {
+                                const existing = new Set($(select).val() || []);
+                                (data.results || []).forEach(item => {
+                                    if (!existing.has(String(item.id))) {
+                                        select.appendChild(new Option(item.text, String(item.id), true, true));
+                                    }
+                                });
+                                if ($.fn.select2) $(select).trigger("change");
+                            });
+                        });
+
+                        clearBtn.addEventListener("click", () => { $(select).val([]).trigger("change"); });
+                        getEditorValue = () => $(select).val() || [];
+                        setEditorValue = (v) => {
+                            if (!Array.isArray(v)) return;
+                            v.forEach(id => {
+                                if (!select.querySelector(`option[value="${id}"]`)) {
+                                    select.appendChild(new Option(String(id), String(id), true, true));
+                                }
+                            });
+                            if ($.fn.select2) $(select).trigger("change");
+                        };
+                        if (initialValue !== undefined) setEditorValue(initialValue);
+                        return;
+                    }
+
+                    // Static choices list.
                     const select = el("select", { class: "superfilter-select", multiple: "multiple" });
                     (field.choices || []).forEach(choice => {
                         select.appendChild(new Option(choice.label, String(choice.value), false, false));

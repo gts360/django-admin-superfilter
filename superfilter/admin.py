@@ -10,6 +10,7 @@ from django.utils import timezone
 from django.utils.encoding import force_str
 from django.utils.html import strip_tags
 from openpyxl.workbook import Workbook
+import logging
 
 from superfilter.logic import (
     apply_rules,
@@ -20,6 +21,8 @@ from superfilter.logic import (
     serialize_fields,
 )
 from superfilter.models import SavedSuperFilter
+
+logger = logging.getLogger(__name__)
 
 
 class SuperFilterChangeList(ChangeList):
@@ -36,9 +39,13 @@ class SuperFilterChangeList(ChangeList):
 class SuperFilterAdminMixin:
     superfilter_param_name = "sf"
     superfilter_columns_param_name = "sfc"
-    superfilter_fields = None
+
+    superfilter_fields = None # Defaults to list_display
+    superfilter_extra_fields = None # Additional fields to superfilter_fields
+
     superfilter_page_size = 25
     superfilter_all_limit = 2000
+
     superfilter_export_xlsx = True
 
     def __init__(self, *args, **kwargs):
@@ -148,7 +155,10 @@ class SuperFilterAdminMixin:
         source_fields = self.superfilter_fields
         if source_fields is None:
             source_fields = self.get_superfilter_default_list_display(request)
-        return source_fields
+        if self.superfilter_extra_fields:
+            return (*self.superfilter_extra_fields, *source_fields)
+        else:
+            return source_fields
 
     def get_superfilter_fields(self, request):
         return list_filterable_fields(self, request, source_fields=self.get_superfilter_source_fields(request))

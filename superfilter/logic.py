@@ -45,6 +45,7 @@ class FilterField:
     kind: str
     choices: list[dict[str, Any]] = dataclass_field(default_factory=list)
     input_type: str | None = None
+    autocomplete_url: str | None = None
 
 
 class SuperFilterField:
@@ -53,12 +54,14 @@ class SuperFilterField:
     kind: str | None = 'all'
     choices: list[dict[str, Any]] | None = None
     input_type: str | None = None
+    autocomplete_url: str | None = None
     input_field: Field | Type[Field] | None = None
     # If set it can be used to apply the filter, supposing that path is annotated in the base queryset.
     # ex. input_filed = models.BooleanField
 
     def __init__(self, path: str | None = None, label: str | None = None,
-                 kind: str | None = None, input_field: Field | None = None):
+                 kind: str | None = None, input_field: Field | None = None,
+                 autocomplete_url: str | None = None):
         if path is not None:
             self.path = path
         if label is not None:
@@ -67,14 +70,22 @@ class SuperFilterField:
             self.kind = kind
         if input_field is not None:
             self.input_field = input_field
+        if autocomplete_url is not None:
+            self.autocomplete_url = autocomplete_url
 
     def to_filter_field(self) -> FilterField:
+        # When autocomplete_url is set, use "choice" kind so the same operators apply;
+        # the frontend will detect autocompleteUrl and fetch options dynamically.
+        kind = self.kind
+        if self.autocomplete_url and kind in (None, 'all'):
+            kind = 'choice'
         return FilterField(
             path=self.path,
             label=self.label,
-            kind=self.kind,
+            kind=kind,
             choices=list(self.choices or []),
             input_type=self.input_type,
+            autocomplete_url=self.autocomplete_url,
         )
 
     def apply_rule(self, queryset, rule: dict[str, Any]):
@@ -219,13 +230,15 @@ def build_filter_field_from_item(model_admin, request, item):
 
 
 def list_filterable_fields(model_admin, request, source_fields=None) -> list[FilterField]:
-    out: list[FilterField] = []
+    out: dict[str, FilterField] = dict()
     for item in (source_fields if source_fields is not None else model_admin.get_list_display(request)):
         filter_field, _custom = build_filter_field_from_item(model_admin, request, item)
-        if filter_field is not None:
-            out.append(filter_field)
-    out.sort(key=lambda ff: ff.label)
-    return out
+        if filter_field is not None and filter_field.path not in out:
+            out[filter_field.path]=filter_field
+
+    ret = list(out.values())
+    ret.sort(key=lambda ff: ff.label)
+    return ret
 
 
 def get_custom_superfilter_map(model_admin, request, source_fields=None) -> dict[str, SuperFilterField]:
@@ -246,6 +259,7 @@ def serialize_fields(fields: list[FilterField]) -> list[dict[str, Any]]:
             "operators": OPERATORS_BY_KIND.get(f.kind, OPERATORS_BY_KIND["all"]),
             "choices": f.choices,
             "inputType": f.input_type,
+            "autocompleteUrl": f.autocomplete_url,
         }
         for f in fields
     ]
