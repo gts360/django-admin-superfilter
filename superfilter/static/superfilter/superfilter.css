@@ -114,7 +114,6 @@
     overflow: visible;
     display: flex;
     flex-direction: column;
-    max-height: 480px;
 }
 
 .superfilter-dropdown-search-wrap {
