@@ -352,6 +352,7 @@
 textarea.superfilter-input {
     display: block;
     width: 100%;
+    box-sizing: border-box;
     padding: 0.625rem 0.875rem;
     font-family: inherit;
     font-size: 0.9375rem;

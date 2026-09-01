@@ -3,6 +3,84 @@
     if (!$) return;
 
     let draggedColumn = null;
+    let changelistRequest = null;
+    let changelistRequestVersion = 0;
+    let changelistSearchTimer = null;
+
+    function setChangeListLoading(isLoading) {
+        const changelist = document.querySelector("#changelist");
+        if (changelist) {
+            changelist.classList.toggle("superfilter-loading", isLoading);
+            changelist.setAttribute("aria-busy", String(isLoading));
+        }
+    }
+
+    function initializeDjangoActions(form) {
+        if (!window.Actions) return;
+        const actionCheckboxes = form.querySelectorAll("tr input.action-select");
+        if (actionCheckboxes.length) window.Actions(actionCheckboxes);
+    }
+
+    function replaceChangeListForm(html, requestUrl) {
+        const response = new DOMParser().parseFromString(html, "text/html");
+        const replacement = response.querySelector("#changelist-form");
+        const current = document.querySelector("#changelist-form");
+
+        // An authentication redirect or an unexpected response must retain the
+        // normal Django navigation behavior rather than replacing partial UI.
+        if (!replacement || !current) {
+            window.location.assign(requestUrl.href);
+            return;
+        }
+
+        current.replaceWith(replacement);
+        initializeDjangoActions(replacement);
+        if (response.title) document.title = response.title;
+        window.history.pushState({}, "", requestUrl.pathname + requestUrl.search + requestUrl.hash);
+    }
+    
+    function requestSubmitChangeListSearch(queryParameters) {
+        window.clearTimeout(changelistSearchTimer);
+        changelistSearchTimer = window.setTimeout(() => {
+            submitChangeListSearch(queryParameters);
+        }, 500);
+    }
+
+    function submitChangeListSearch(queryParameters) {
+        window.clearTimeout(changelistSearchTimer);
+        const requestVersion = ++changelistRequestVersion;
+        if (changelistRequest) changelistRequest.abort();
+
+        const requestUrl = new URL(window.location.href);
+        Object.entries(queryParameters).forEach(([name, value]) => {
+            requestUrl.searchParams.set(name, value);
+        });
+        // A changed search/filter must start from Django's first result page.
+        requestUrl.searchParams.delete("p");
+
+        setChangeListLoading(true);
+        changelistRequest = $.ajax({
+            url: requestUrl.href,
+            method: "GET",
+            dataType: "html",
+            headers: { "X-Requested-With": "XMLHttpRequest" },
+        }).done(html => {
+            if (requestVersion === changelistRequestVersion) {
+                replaceChangeListForm(html, requestUrl);
+            }
+        }).fail((_xhr, status) => {
+            // An aborted request is expected whenever the user keeps typing.
+            if (status !== "abort" && requestVersion === changelistRequestVersion) {
+                console.error("Unable to refresh the Django changelist.");
+            }
+        }).always(() => {
+            if (requestVersion === changelistRequestVersion) {
+                changelistRequest = null;
+                setChangeListLoading(false);
+            }
+        });
+        return true;
+    }
 
     const ICON_PATHS = {
         addFilter: '/static/superfilter/icons/add-filter.svg',
@@ -1041,94 +1119,38 @@
             this.updateApplyButtonState();
         }
 
+        getQueryParameters() {
+            return {
+                [this.meta.param]: JSON.stringify(this.rules),
+                [this.meta.columnsParam]: JSON.stringify(this.getSelectedColumns()),
+            };
+        }
+
         apply() {
-            const form = document.querySelector("#changelist-search") ||
-                         document.querySelector("form#changelist-form") ||
-                         document.querySelector("#changelist-form") ||
-                         document.querySelector("form");
-            if (!form) return;
-
-            let hidden = form.querySelector(`input[name='${this.meta.param}']`);
-            if (!hidden) {
-                hidden = el("input", { type: "hidden", name: this.meta.param });
-                form.appendChild(hidden);
-            }
-            hidden.value = JSON.stringify(this.rules);
-
-            let columnsHidden = form.querySelector(`input[name='${this.meta.columnsParam}']`);
-            if (!columnsHidden) {
-                columnsHidden = el("input", { type: "hidden", name: this.meta.columnsParam });
-                form.appendChild(columnsHidden);
-            }
-            columnsHidden.value = JSON.stringify(this.getSelectedColumns());
-
             this.lastAppliedRules = normalizeRules(this.rules);
             this.lastAppliedColumns = normalizeColumns(this.getSelectedColumns());
-            this.container.classList.add('superfilter-loading');
-            form.submit();
+            requestSubmitChangeListSearch(this.getQueryParameters());
         }
 
         export() {
-            const form = document.querySelector("#changelist-search") ||
-                         document.querySelector("form#changelist-form") ||
-                         document.querySelector("#changelist-form") ||
-                         document.querySelector("form");
-            if (!form) return;
+            if (!this.meta.exportXLSXUrl) return;
 
-            const origAction = form.action;
-            const origMethod = form.method;
-
-            // Set form action to this.meta.exportXLSXUrl and GET
-            form.action = joinUrl(getChangeListBasePath(), this.meta.exportXLSXUrl);
-            form.method = "GET";
-
-            let hidden = form.querySelector(`input[name='${this.meta.param}']`);
-            if (!hidden) {
-                hidden = el("input", { type: "hidden", name: this.meta.param });
-                form.appendChild(hidden);
-            }
-            hidden.value = JSON.stringify(this.rules);
-
-            let columnsHidden = form.querySelector(`input[name='${this.meta.columnsParam}']`);
-            if (!columnsHidden) {
-                columnsHidden = el("input", { type: "hidden", name: this.meta.columnsParam });
-                form.appendChild(columnsHidden);
-            }
-            columnsHidden.value = JSON.stringify(this.getSelectedColumns());
-
-            form.submit();
-            setTimeout(() => {
-              form.action = origAction;
-              form.method = origMethod;
-            }, 0)
+            const currentUrl = new URL(window.location.href);
+            const exportUrl = new URL(joinUrl(getChangeListBasePath(), this.meta.exportXLSXUrl), window.location.origin);
+            currentUrl.searchParams.forEach((value, name) => exportUrl.searchParams.append(name, value));
+            Object.entries(this.getQueryParameters()).forEach(([name, value]) => {
+                exportUrl.searchParams.set(name, value);
+            });
+            exportUrl.searchParams.delete("p");
+            window.location.assign(exportUrl.href);
         }
 
         reset() {
-            const form = document.querySelector("#changelist-search") ||
-                         document.querySelector("form#changelist-form") ||
-                         document.querySelector("#changelist-form") ||
-                         document.querySelector("form");
-            if (!form) return;
-
             this.rules = [];
             this.selectedCount = this.getDefaultColumns().length;
             this.columnOrder = this.getDefaultColumns();
             this.columnsExpanded = false;
-
-            let hidden = form.querySelector(`input[name='${this.meta.param}']`);
-            if (!hidden) {
-                hidden = el("input", { type: "hidden", name: this.meta.param });
-                form.appendChild(hidden);
-            }
-            hidden.value = "[]";
-
-            let columnsHidden = form.querySelector(`input[name='${this.meta.columnsParam}']`);
-            if (!columnsHidden) {
-                columnsHidden = el("input", { type: "hidden", name: this.meta.columnsParam });
-                form.appendChild(columnsHidden);
-            }
-            columnsHidden.value = JSON.stringify(this.getDefaultColumns());
-            form.submit();
+            requestSubmitChangeListSearch(this.getQueryParameters());
         }
     }
 
