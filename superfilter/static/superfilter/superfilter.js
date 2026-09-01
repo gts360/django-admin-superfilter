@@ -19,12 +19,24 @@
         if (!window.Actions) return;
         const actionCheckboxes = form.querySelectorAll("tr input.action-select");
         if (actionCheckboxes.length) window.Actions(actionCheckboxes);
+
+        if(document.querySelector("#jazzy-sidebar") && document.querySelector("select[name=action]")) {
+            const $actionSelect = $("select[name=action]");
+            $actionSelect.select2();
+        }
     }
 
     function replaceChangeListForm(html, requestUrl) {
         const response = new DOMParser().parseFromString(html, "text/html");
-        const replacement = response.querySelector("#changelist-form");
-        const current = document.querySelector("#changelist-form");
+
+        // In jazzmin the #changelist is inside the #changelist-form leading to superfilter mounted inside
+
+        const superFilterInForm = !! document.querySelector("#changelist-form .superfilter-container");
+
+        const replacedSelector = superFilterInForm ? "#changelist" : "#changelist-form";
+
+        const replacement = response.querySelector(replacedSelector);
+        const current = document.querySelector(replacedSelector);
 
         // An authentication redirect or an unexpected response must retain the
         // normal Django navigation behavior rather than replacing partial UI.
