@@ -155,6 +155,10 @@ class SuperFilterAdminMixin:
         source_fields = self.superfilter_fields
         if source_fields is None:
             source_fields = self.get_superfilter_default_list_display(request)
+            if self.superfilter_extra_fields:
+                # Extra fields have prioerity over source_field if path is used
+                extra_paths = set(f.path for f in self.superfilter_extra_fields)
+                source_fields = [f for f in source_fields if self._colname(f) not in extra_paths]
         if self.superfilter_extra_fields:
             return (*self.superfilter_extra_fields, *source_fields)
         else:
