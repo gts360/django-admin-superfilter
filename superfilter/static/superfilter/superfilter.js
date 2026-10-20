@@ -210,15 +210,28 @@
         const op = rule.op;
         const value = rule.value;
 
+        const VALUE_VISIBLE_OPERATORS = ["eq", "neq", "contains", "not_contains", "after", "before", "between"];
+        const MAX_BADGE_VALUE_LENGTH = 20;
+        const truncateValue = (raw) => {
+            const text = String(raw || "");
+            if (text.length <= MAX_BADGE_VALUE_LENGTH) return text;
+            return text.substring(0, MAX_BADGE_VALUE_LENGTH - 3) + "...";
+        };
+
         if (["set", "not_set", "true", "false", "empty"].includes(op)) return null;
-        if (field.kind === "choice") return null;
-        if (field.kind === "fk" && Array.isArray(value)) return `(${value.length})`;
-        if (["in", "not_in"].includes(op) && Array.isArray(value)) return `(${value.length})`;
-        if (["date", "datetime"].includes(field.kind) && op === "between" && Array.isArray(value)) {
-            return `${value[0] || "-"} -> ${value[1] || "-"}`;
+        if (["in", "not_in"].includes(op)) {
+            const count = Array.isArray(value) ? value.length : 0;
+            return `(${count} values)`;
         }
-        if (typeof value === "string" && value.length > 30) return value.substring(0, 27) + "...";
-        return value ? String(value) : null;
+        if (!VALUE_VISIBLE_OPERATORS.includes(op)) return null;
+
+        if (op === "between") {
+            if (!Array.isArray(value)) return null;
+            return truncateValue(`${value[0] || "-"} -> ${value[1] || "-"}`);
+        }
+        if (Array.isArray(value)) return truncateValue(value.join(", "));
+        if (value === null || value === undefined || value === "") return null;
+        return truncateValue(value);
     }
 
     const NO_VALUE_OPERATORS = ["set", "not_set", "true", "false", "empty"];
