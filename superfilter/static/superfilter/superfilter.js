@@ -147,12 +147,17 @@
         const hint = el('span', { class: 'superfilter-empty-hint' }, 'Chargement des filtres...');
         const actions = el('div', { class: 'superfilter-actions' });
         const applyBtn = el('button', { type: 'button', class: 'superfilter-btn primary superfilter-split-main', disabled: 'disabled' }, 'Appliquer');
+        const autoApplyLabel = el('label', { class: 'superfilter-auto-apply-toggle' });
+        const autoApplyInput = el('input', { type: 'checkbox', disabled: 'disabled', checked: 'checked' });
+        autoApplyLabel.appendChild(autoApplyInput);
+        autoApplyLabel.appendChild(el('span', {}, 'Auto.'));
         const menuBtn = el('button', { type: 'button', class: 'superfilter-btn primary superfilter-split-toggle' }, '▾');
         const resetBtn = el('button', { type: 'button', class: 'superfilter-btn superfilter-icon-btn', title: 'Réinitialiser', 'aria-label': 'Réinitialiser' });
         resetBtn.appendChild(iconButtonContent('reload', 'Réinitialiser'));
         const split = el('div', { class: 'superfilter-split-btn' });
         split.appendChild(applyBtn);
         split.appendChild(menuBtn);
+        actions.appendChild(autoApplyLabel);
         actions.appendChild(split);
         actions.appendChild(resetBtn);
         bar.appendChild(addBtn);
@@ -218,6 +223,7 @@
 
     const NO_VALUE_OPERATORS = ["set", "not_set", "true", "false", "empty"];
     const SAVED_FILTERS_VISIBLE_COUNT = 5;
+    const AUTO_APPLY_STORAGE_KEY = "superfilter:autoApply";
 
     class SuperFilterUI {
         constructor(meta) {
@@ -230,9 +236,28 @@
             this.columnOrder = this.buildColumnOrder(Array.isArray(meta.selectedColumns) ? meta.selectedColumns : []);
             this.lastAppliedRules = normalizeRules(this.rules);
             this.lastAppliedColumns = normalizeColumns(this.getSelectedColumns());
+            this.autoApplyEnabled = this.loadAutoApplyPreference();
             this.savedFilters = Array.isArray(meta.savedFilters) ? [...meta.savedFilters] : [];
             this.columnsExpanded = this.shouldColumnsStartExpanded();
             this.mount();
+        }
+
+        loadAutoApplyPreference() {
+            try {
+                const stored = window.localStorage.getItem(AUTO_APPLY_STORAGE_KEY);
+                if (stored === null) return true;
+                return stored !== "false";
+            } catch (_error) {
+                return true;
+            }
+        }
+
+        persistAutoApplyPreference() {
+            try {
+                window.localStorage.setItem(AUTO_APPLY_STORAGE_KEY, String(this.autoApplyEnabled));
+            } catch (_error) {
+                // Ignore storage errors (private mode or blocked storage).
+            }
         }
 
         shouldColumnsStartExpanded() {
@@ -378,6 +403,11 @@
             const actions = el("div", { class: "superfilter-actions" });
             const applySplit = el("div", { class: "superfilter-split-btn" });
             const applyBtn = el("button", { type: "button", class: "superfilter-btn primary superfilter-split-main", disabled: 'disabled' }, "Appliquer");
+            const autoApplyLabel = el("label", { class: "superfilter-auto-apply-toggle" });
+            const autoApplyInput = el("input", { type: "checkbox" });
+            autoApplyInput.checked = !!this.autoApplyEnabled;
+            autoApplyLabel.appendChild(autoApplyInput);
+            autoApplyLabel.appendChild(el("span", {}, "Auto."));
             const menuBtn = el("button", { type: "button", class: "superfilter-btn primary superfilter-split-toggle", }, "▾");
             const applyDropdown = el("div", { class: "superfilter-apply-menu", style: "display:none;" });
             if(this.meta.exportXLSXUrl) {
@@ -394,6 +424,12 @@
             resetBtn.appendChild(iconButtonContent('reload', 'Réinitialiser'));
 
             applyBtn.addEventListener("click", () => this.apply());
+            autoApplyInput.addEventListener("change", () => {
+                this.autoApplyEnabled = autoApplyInput.checked;
+                this.persistAutoApplyPreference();
+                this.updateApplyButtonState(!this.autoApplyEnabled);
+            });
+
             menuBtn.addEventListener("click", (e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -410,6 +446,7 @@
             applySplit.appendChild(applyBtn);
             applySplit.appendChild(menuBtn);
             applySplit.appendChild(applyDropdown);
+            actions.appendChild(autoApplyLabel);
             actions.appendChild(applySplit);
             actions.appendChild(resetBtn);
             searchbar.appendChild(actions);
@@ -419,6 +456,7 @@
             this.applySplit = applySplit;
             this.applyDropdown = applyDropdown;
             this.applyBtn = applyBtn;
+            this.autoApplyInput = autoApplyInput;
             this.resetBtn = resetBtn;
 
             this.columnsToggleLink = el('button', { type: 'button', class: 'superfilter-columns-toggle-link', title: 'Colonnes', 'aria-label': 'Colonnes' });
@@ -1110,12 +1148,16 @@
             document.body.appendChild(overlay);
         }
 
-        updateApplyButtonState() {
+        updateApplyButtonState(enableApplyButton) {
             if (!this.applyBtn) return;
             const rulesDirty = normalizeRules(this.rules) !== this.lastAppliedRules;
             const columnsDirty = normalizeColumns(this.getSelectedColumns()) !== this.lastAppliedColumns;
             const isDirty = rulesDirty || columnsDirty;
-            if(isDirty) this.apply();
+            if (this.autoApplyInput) {
+                this.autoApplyInput.checked = !!this.autoApplyEnabled;
+            }
+            this.applyBtn.disabled = this.autoApplyEnabled ? true : (!enableApplyButton && !isDirty);
+            if (isDirty && this.autoApplyEnabled) this.apply();
             if (this.resetBtn) {
                 this.resetBtn.disabled = !isDirty && !this.rules.length && !this.isColumnCustomizationApplied();
             }
@@ -1142,6 +1184,7 @@
             this.lastAppliedRules = normalizeRules(this.rules);
             this.lastAppliedColumns = normalizeColumns(this.getSelectedColumns());
             requestSubmitChangeListSearch(this.getQueryParameters());
+            this.updateApplyButtonState();
         }
 
         export() {

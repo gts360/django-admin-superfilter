@@ -268,6 +268,27 @@
     flex-shrink: 0;
     align-items: center;
 }
+
+.superfilter-auto-apply-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.85rem;
+    color: #495057;
+    user-select: none;
+    cursor: pointer;
+    margin-top: 9px;
+}
+
+.superfilter-auto-apply-toggle input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+}
+
+.superfilter-auto-apply-toggle input[type="checkbox"]:disabled {
+    cursor: not-allowed;
+}
+
 .superfilter-overlay {
     position: fixed;
     top: 0;

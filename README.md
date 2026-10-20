@@ -71,6 +71,7 @@ The package adds a search-bar-like control above the changelist with:
 - an add-filter button
 - filter badges for current rules
 - an Apply button
+- an Auto apply checkbox (enabled by default)
 - a split menu with Save
 - a Reset button
 - a Columns toggle button
