@@ -489,7 +489,11 @@
                     });
                     if (!hasInlineQuery()) row.setAttribute("disabled", "disabled");
 
-                    row.appendChild(el("span", { class: "superfilter-inline-item-line" }, `${field.label || field.path} contient ${valuePreview}`));
+                    const line = row.appendChild(el("div", { class: "superfilter-inline-item-line" }));
+                    line.appendChild(el("span", { class: "superfilter-badge-label" }, field.label));
+                    line.appendChild(el("span", { class: "superfilter-badge-op" }, getOperatorLabel('contains')));
+                    line.appendChild(el("span", { class: "superfilter-badge-value" }, valuePreview));
+
                     row.addEventListener("mousedown", (e) => e.preventDefault());
                     row.addEventListener("mouseenter", () => {
                         const rows = [...inlineDropdownList.querySelectorAll(".superfilter-inline-item")];
