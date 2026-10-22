@@ -182,6 +182,12 @@
         return JSON.stringify(Array.isArray(columns) ? columns : []);
     }
 
+    function truncateWithEllipsis(raw, maxLen = 20) {
+        const text = String(raw || "");
+        if (text.length <= maxLen) return text;
+        return text.substring(0, Math.max(1, maxLen - 3)) + "...";
+    }
+
     function getOperatorLabel(op) {
         const labels = {
             set: "est défini",
@@ -212,11 +218,6 @@
 
         const VALUE_VISIBLE_OPERATORS = ["eq", "neq", "contains", "not_contains", "after", "before", "between"];
         const MAX_BADGE_VALUE_LENGTH = 20;
-        const truncateValue = (raw) => {
-            const text = String(raw || "");
-            if (text.length <= MAX_BADGE_VALUE_LENGTH) return text;
-            return text.substring(0, MAX_BADGE_VALUE_LENGTH - 3) + "...";
-        };
 
         if (["set", "not_set", "true", "false", "empty"].includes(op)) return null;
         if (["in", "not_in"].includes(op)) {
@@ -227,11 +228,11 @@
 
         if (op === "between") {
             if (!Array.isArray(value)) return null;
-            return truncateValue(`${value[0] || "-"} -> ${value[1] || "-"}`);
+            return truncateWithEllipsis(`${value[0] || "-"} -> ${value[1] || "-"}`, MAX_BADGE_VALUE_LENGTH);
         }
-        if (Array.isArray(value)) return truncateValue(value.join(", "));
+        if (Array.isArray(value)) return truncateWithEllipsis(value.join(", "), MAX_BADGE_VALUE_LENGTH);
         if (value === null || value === undefined || value === "") return null;
-        return truncateValue(value);
+        return truncateWithEllipsis(value, MAX_BADGE_VALUE_LENGTH);
     }
 
     const NO_VALUE_OPERATORS = ["set", "not_set", "true", "false", "empty"];
@@ -398,14 +399,222 @@
                 if (!addWrapper.contains(e.target)) dropdown.style.display = "none";
                 if (this.applyDropdown && !this.applySplit?.contains(e.target)) this.applyDropdown.style.display = "none";
                 if (this.savedMoreMenu && !this.savedMoreWrap?.contains(e.target)) this.savedMoreMenu.style.display = 'none';
+                if (!inlineWrap.contains(e.target)) {
+                    inlineDropdown.style.display = "none";
+                    if (inlineInput.value.trim()) updateInlineState(true);
+                }
             });
 
             addWrapper.appendChild(addBtn);
             addWrapper.appendChild(dropdown);
             searchbar.appendChild(addWrapper);
 
-            const badgesContainer = el("div", { style: "display:flex; gap:8px; flex-wrap:wrap; flex-grow:1;" });
-            this.renderBadges(badgesContainer);
+            const inlineWrap = el("div", { class: "superfilter-inline-wrap" });
+            const inlineInput = el("input", {
+                type: "text",
+                class: "superfilter-inline-input",
+                autocomplete: "off",
+                placeholder: "Taper pour ajouter un filtre ...",
+                'aria-label': 'Ajouter un filtre texte',
+            });
+            const inlineClearBtn = el("button", {
+                type: "button",
+                class: "superfilter-inline-clear",
+                title: "Effacer",
+                'aria-label': 'Effacer',
+                style: "display:none;",
+            }, "x");
+            const inlineDropdown = el("div", { class: "superfilter-inline-dropdown", style: "display:none;" });
+            const inlineDropdownList = el("div", { class: "superfilter-inline-dropdown-list" });
+            const inlineDropdownEmpty = el("div", { class: "superfilter-inline-dropdown-empty", style: "display:none;" }, "Aucun filtre texte proposé");
+            inlineDropdown.appendChild(inlineDropdownList);
+            inlineDropdown.appendChild(inlineDropdownEmpty);
+            inlineWrap.appendChild(inlineInput);
+            inlineWrap.appendChild(inlineClearBtn);
+            inlineWrap.appendChild(inlineDropdown);
+
+            const inlineFields = Array.isArray(this.meta.inlineFilterFields)
+                ? this.meta.inlineFilterFields
+                : (Array.isArray(this.meta.fields) ? this.meta.fields.filter(field => (field.operators || []).includes("contains")) : []);
+            const hasInlineQuickInput = inlineFields.length > 0;
+
+            let visibleInlineSuggestions = [];
+            let highlightedInlineIndex = -1;
+            const getInlineQuery = () => inlineInput.value.trim();
+            const hasInlineQuery = () => getInlineQuery().length > 0;
+
+            const updateInlineState = (pendingInvalid) => {
+                inlineWrap.classList.toggle("superfilter-inline-pending-invalid", !!pendingInvalid);
+                const showClear = hasInlineQuery() || !!pendingInvalid;
+                inlineClearBtn.style.display = showClear ? "inline-flex" : "none";
+            };
+
+            const closeInlineDropdown = () => {
+                inlineDropdown.style.display = "none";
+                highlightedInlineIndex = -1;
+            };
+
+            const clampInlineIndex = (idx) => {
+                if (!visibleInlineSuggestions.length) return -1;
+                if (idx < 0) return visibleInlineSuggestions.length - 1;
+                if (idx >= visibleInlineSuggestions.length) return 0;
+                return idx;
+            };
+
+            const highlightInlineSuggestion = (idx) => {
+                highlightedInlineIndex = clampInlineIndex(idx);
+                const rows = inlineDropdownList.querySelectorAll(".superfilter-inline-item");
+                rows.forEach((row, rowIndex) => {
+                    row.classList.toggle("active", rowIndex === highlightedInlineIndex);
+                });
+                if (highlightedInlineIndex >= 0 && rows[highlightedInlineIndex]) {
+                    rows[highlightedInlineIndex].scrollIntoView({ block: "nearest" });
+                }
+            };
+
+            const getInlineMatches = () => inlineFields;
+
+            const renderInlineSuggestions = () => {
+                const matches = getInlineMatches();
+                visibleInlineSuggestions = matches;
+                inlineDropdownList.innerHTML = "";
+                inlineDropdownEmpty.style.display = matches.length ? "none" : "";
+                highlightedInlineIndex = matches.length ? 0 : -1;
+
+                const valuePreview = hasInlineQuery() ? `\"${truncateWithEllipsis(getInlineQuery(), 20)}\"` : "...";
+                matches.forEach((field) => {
+                    const row = el("button", {
+                        type: "button",
+                        class: "superfilter-inline-item",
+                    });
+                    if (!hasInlineQuery()) row.setAttribute("disabled", "disabled");
+
+                    row.appendChild(el("span", { class: "superfilter-inline-item-line" }, `${field.label || field.path} contient ${valuePreview}`));
+                    row.addEventListener("mousedown", (e) => e.preventDefault());
+                    row.addEventListener("mouseenter", () => {
+                        const rows = [...inlineDropdownList.querySelectorAll(".superfilter-inline-item")];
+                        const hoveredIndex = rows.indexOf(row);
+                        if (hoveredIndex >= 0) highlightInlineSuggestion(hoveredIndex);
+                    });
+                    row.addEventListener("click", (e) => {
+                        e.preventDefault();
+                        const value = getInlineQuery();
+                        if (!value) {
+                            updateInlineState(true);
+                            return;
+                        }
+                        this.rules.push({ field: field.path, op: "contains", value });
+                        this.refreshUI();
+                        inlineInput.value = "";
+                        updateInlineState(false);
+                        closeInlineDropdown();
+                    });
+                    inlineDropdownList.appendChild(row);
+                });
+                highlightInlineSuggestion(highlightedInlineIndex);
+            };
+
+            const openInlineDropdown = () => {
+                if (!hasInlineQuery()) {
+                    closeInlineDropdown();
+                    return;
+                }
+                renderInlineSuggestions();
+                inlineDropdown.style.display = visibleInlineSuggestions.length ? "block" : "none";
+            };
+
+            inlineInput.addEventListener("focus", () => {
+                updateInlineState(false);
+                if(hasInlineQuery())
+                  openInlineDropdown();
+                else
+                  closeInlineDropdown();
+            });
+            inlineInput.addEventListener("input", () => {
+                updateInlineState(false);
+                if (hasInlineQuery()) openInlineDropdown();
+                else closeInlineDropdown();
+            });
+            inlineInput.addEventListener("keydown", (e) => {
+                if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    if (!hasInlineQuery()) {
+                        closeInlineDropdown();
+                        return;
+                    }
+                    if (inlineDropdown.style.display === "none") {
+                        openInlineDropdown();
+                    } else {
+                        highlightInlineSuggestion(highlightedInlineIndex + 1);
+                    }
+                    return;
+                }
+                if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    if (!hasInlineQuery()) {
+                        closeInlineDropdown();
+                        return;
+                    }
+                    if (inlineDropdown.style.display === "none") {
+                        openInlineDropdown();
+                    } else {
+                        highlightInlineSuggestion(highlightedInlineIndex - 1);
+                    }
+                    return;
+                }
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (visibleInlineSuggestions.length) {
+                        const selectedIndex = highlightedInlineIndex >= 0 ? highlightedInlineIndex : 0;
+                        const selectedField = visibleInlineSuggestions[selectedIndex];
+                        const value = getInlineQuery();
+                        if (!value) {
+                            updateInlineState(true);
+                            return;
+                        }
+                        this.rules.push({ field: selectedField.path, op: "contains", value });
+                        this.refreshUI();
+                        inlineInput.value = "";
+                        updateInlineState(false);
+                        closeInlineDropdown();
+                    } else {
+                        updateInlineState(true);
+                    }
+                }
+                if (e.key === "Escape") {
+                    closeInlineDropdown();
+                }
+            });
+            inlineInput.addEventListener("blur", () => {
+                window.setTimeout(() => {
+                    if (!inlineWrap.contains(document.activeElement)) {
+                        closeInlineDropdown();
+                        if (hasInlineQuery()) updateInlineState(true);
+                    }
+                }, 100);
+            });
+            inlineClearBtn.addEventListener("click", (e) => {
+                e.preventDefault();
+                inlineInput.value = "";
+                updateInlineState(false);
+                closeInlineDropdown();
+                inlineInput.focus();
+            });
+
+            const badgesContainer = el("div", { class: "superfilter-badges-input-flex" });
+            const badgesList = el("div", { class: "superfilter-badges-list" });
+            this.renderBadges(badgesList);
+            badgesContainer.appendChild(badgesList);
+            if (hasInlineQuickInput) {
+                badgesContainer.classList.add("inline-enabled");
+                badgesList.appendChild(inlineWrap);
+                badgesContainer.addEventListener("click", (e) => {
+                    if (e.target.closest(".superfilter-badge") || e.target.closest("button, a, select, textarea")) return;
+                    if (e.target === badgesContainer || e.target === badgesList || e.target === inlineWrap) {
+                        inlineInput.focus();
+                    }
+                });
+            }
             searchbar.appendChild(badgesContainer);
 
             this.emptyHint = el("span", { class: "superfilter-empty-hint" }, "Aucun filtre");
@@ -465,7 +674,8 @@
             searchbar.appendChild(actions);
 
             this.container.appendChild(searchbar);
-            this.badgesContainer = badgesContainer;
+            this.badgesContainer = badgesList;
+            this.inlineWrap = inlineWrap;
             this.applySplit = applySplit;
             this.applyDropdown = applyDropdown;
             this.applyBtn = applyBtn;
@@ -747,7 +957,9 @@
         }
 
         renderBadges(container) {
-            container.innerHTML = "";
+            const oldBadges = container.getElementsByClassName("superfilter-badge");
+            while(oldBadges.length) oldBadges[0].remove();
+
             this.rules.forEach((rule, idx) => {
                 const field = this.meta.fields.find(f => f.path === rule.field);
                 if (!field) return;
@@ -771,7 +983,7 @@
 
                 badge.addEventListener("click", () => this.openModal(field, rule.op, idx));
                 badge.appendChild(removeBtn);
-                container.appendChild(badge);
+                container.insertBefore(badge, this.inlineWrap);
             });
         }
 

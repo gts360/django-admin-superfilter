@@ -56,6 +56,18 @@ class _CustomFieldAdmin(SuperFilterAdminMixin):
     superfilter_fields = ('VIN', PassagesFictifField)
 
 
+class _InlineContainsField(SuperFilterField):
+    path = 'custom_inline_text'
+    label = 'Texte inline custom'
+    kind = 'text'
+
+
+class _DummySuperfilterAdminInlineOverrides(SuperFilterAdminMixin):
+    model = OperationVIN
+    superfilter_fields = ('VIN', 'etat', _InlineContainsField)
+    superfilter_inline_filter_fields = ('custom_inline_text', 'etat', 'VIN', 'missing_field')
+
+
 class SuperfilterLogicTests(SimpleTestCase):
     databases = {'default'}
 
@@ -144,6 +156,30 @@ class SuperfilterLogicTests(SimpleTestCase):
         self.assertEqual(payload.get("rules"), [{"field": "VIN", "op": "contains", "value": "ABC"}])
         self.assertTrue(payload.get("columns"))
         self.assertTrue(payload.get("selectedColumns"))
+
+    def test_meta_view_default_inline_fields_are_contains_capable(self):
+        admin_instance = _DummySuperfilterAdmin(OperationVIN, admin.site)
+        request = RequestFactory().get('/admin/appagent/operationvin/superfilter/meta/')
+        response = admin_instance.superfilter_meta_view(request)
+        payload = json.loads(response.content)
+        inline_paths = [item['path'] for item in payload.get('inlineFilterFields', [])]
+
+        self.assertIn('VIN', inline_paths)
+        self.assertIn('carlog_plateforme_nom', inline_paths)
+        self.assertIn('agent_affecte__carlog_employe_nom', inline_paths)
+
+    def test_meta_view_inline_fields_respect_config_order_and_skip_invalid(self):
+        admin_instance = _DummySuperfilterAdminInlineOverrides(OperationVIN, admin.site)
+        request = RequestFactory().get('/admin/appagent/operationvin/superfilter/meta/')
+        with self.assertLogs('superfilter.admin', level='WARNING') as captured:
+            response = admin_instance.superfilter_meta_view(request)
+        payload = json.loads(response.content)
+        inline_paths = [item['path'] for item in payload.get('inlineFilterFields', [])]
+
+        self.assertEqual(inline_paths, ['custom_inline_text', 'VIN'])
+        warnings = '\n'.join(captured.output)
+        self.assertIn('does not support', warnings)
+        self.assertIn('unknown path', warnings)
 
     def test_superfilter_fields_override_list_display(self):
         admin_instance = _DummySuperfilterAdminCustomFields(OperationVIN, admin.site)

@@ -13,6 +13,7 @@ from openpyxl.workbook import Workbook
 import logging
 
 from superfilter.logic import (
+    OPERATORS_BY_KIND,
     apply_rules,
     get_custom_superfilter_map,
     list_filterable_fields,
@@ -42,6 +43,9 @@ class SuperFilterAdminMixin:
 
     superfilter_fields = None # Defaults to list_display
     superfilter_extra_fields = None # Additional fields to superfilter_fields
+    # Ordered list of field paths proposed by the inline quick input.
+    # Defaults to all fields that support the "contains" operator.
+    superfilter_inline_filter_fields = None
 
     superfilter_page_size = 25
     superfilter_all_limit = 2000
@@ -167,6 +171,51 @@ class SuperFilterAdminMixin:
     def get_superfilter_fields(self, request):
         return list_filterable_fields(self, request, source_fields=self.get_superfilter_source_fields(request))
 
+    def get_superfilter_inline_filter_fields(self, request):
+        fields = self.get_superfilter_fields(request)
+        by_path = {field.path: field for field in fields}
+
+        configured = self.superfilter_inline_filter_fields
+        if configured is None:
+            candidates = fields
+        elif isinstance(configured, (list, tuple)):
+            candidates = []
+            for raw_path in configured:
+                path = str(raw_path)
+                field = by_path.get(path)
+                if field is None:
+                    logger.warning(
+                        "superfilter_inline_filter_fields contains unknown path '%s' for %s.%s; skipping",
+                        path,
+                        self.opts.app_label,
+                        self.opts.model_name,
+                    )
+                    continue
+                candidates.append(field)
+        else:
+            logger.warning(
+                "superfilter_inline_filter_fields must be a list/tuple on %s.%s; using default inline fields",
+                self.opts.app_label,
+                self.opts.model_name,
+            )
+            candidates = fields
+
+        ret = []
+        for field in candidates:
+            operators = OPERATORS_BY_KIND.get(field.kind, OPERATORS_BY_KIND["all"])
+            if "contains" in operators:
+                ret.append(field)
+                continue
+            if configured is not None:
+                logger.warning(
+                    "superfilter_inline_filter_fields path '%s' does not support 'contains' (kind=%s) for %s.%s; skipping",
+                    field.path,
+                    field.kind,
+                    self.opts.app_label,
+                    self.opts.model_name,
+                )
+        return ret
+
     def get_superfilter_custom_fields(self, request):
         return get_custom_superfilter_map(self, request, source_fields=self.get_superfilter_source_fields(request))
 
@@ -217,6 +266,7 @@ class SuperFilterAdminMixin:
 
     def superfilter_meta_view(self, request):
         fields = self.get_superfilter_fields(request)
+        inline_fields = self.get_superfilter_inline_filter_fields(request)
         return JsonResponse(
             {
                 "param": self.superfilter_param_name,
@@ -230,6 +280,14 @@ class SuperFilterAdminMixin:
                 "exportXLSXUrl": "superfilter/export-xlsx/" if self.superfilter_export_xlsx else None,
                 "deleteUrlTemplate": "superfilter/delete/__ID__/",
                 "savedFilters": self._get_saved_filters_payload(request),
+                "inlineFilterFields": [
+                    {
+                        "path": field.path,
+                        "label": field.label,
+                        "kind": field.kind,
+                    }
+                    for field in inline_fields
+                ],
             }
         )
 

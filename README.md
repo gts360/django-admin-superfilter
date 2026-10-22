@@ -69,6 +69,7 @@ Important:
 The package adds a search-bar-like control above the changelist with:
 
 - an add-filter button
+- an inline text input with suggestions for quick `contains` filters
 - filter badges for current rules
 - an Apply button
 - an Auto apply checkbox (enabled by default)
@@ -174,6 +175,7 @@ Operators:
 - `superfilter_param_name = "sf"`
 - `superfilter_columns_param_name = "sfc"`
 - `superfilter_fields = None`
+- `superfilter_inline_filter_fields = None`
 - `superfilter_page_size = 25`
 - `superfilter_all_limit = 2000`
 
@@ -182,9 +184,14 @@ Example:
 ```python
 class BirdAdmin(SuperFilterAdminMixin, admin.ModelAdmin):
     list_display = ("species", "location", "count")
+    superfilter_inline_filter_fields = ("species", "location__city")
     superfilter_page_size = 50
     superfilter_all_limit = 5000
 ```
+
+`superfilter_inline_filter_fields` controls the fields suggested by the inline input and their order.
+If omitted, all fields that support the `contains` operator are suggested.
+If a configured path is invalid or does not support `contains`, it is skipped and a warning is logged.
 
 ## Restricting filterable fields
 
