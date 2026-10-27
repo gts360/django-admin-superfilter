@@ -1,6 +1,5 @@
 import json
 from datetime import timedelta
-from types import SimpleNamespace
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
@@ -129,17 +128,18 @@ class SuperfilterLogicTests(SimpleTestCase):
         admin_instance = _DummySuperfilterAdmin(OperationVIN, admin.site)
         request = RequestFactory().get(
             "/admin/appagent/operationvin/",
-            {"sf": "[]", "sfc": json.dumps(["VIN"]), "carlog_plateforme_nom__exact": "P1"},
+            {"sf": "[]", "sfc": json.dumps(["VIN"]), "carlog_plateforme_nom__exact": "P1", "_": "12345"},
         )
 
         changelist_cls = admin_instance.get_changelist(request)
         changelist = changelist_cls.__new__(changelist_cls)
-        changelist.params = {"sf": "[]", "sfc": json.dumps(["VIN"]), "carlog_plateforme_nom__exact": "P1"}
-        changelist.filter_params = {"sf": ["[]"], "sfc": [json.dumps(["VIN"])], "carlog_plateforme_nom__exact": ["P1"]}
+        changelist.params = {"sf": "[]", "sfc": json.dumps(["VIN"]), "carlog_plateforme_nom__exact": "P1", "_": "12345"}
+        changelist.filter_params = {"sf": ["[]"], "sfc": [json.dumps(["VIN"])], "carlog_plateforme_nom__exact": ["P1"], "_": ["12345"]}
 
         params = changelist.get_filters_params()
         self.assertNotIn("sf", params)
         self.assertNotIn("sfc", params)
+        self.assertNotIn("_", params)
         self.assertEqual(params.get("carlog_plateforme_nom__exact"), ["P1"])
 
     def test_meta_view_returns_rules_from_sf(self):
@@ -361,6 +361,7 @@ class SuperfilterExportLockTests(TestCase):
         self.assertEqual(response.status_code, 429)
         self.assertEqual(response['X-Superfilter-Can-Start'], 'false')
         self.assertEqual(response['Retry-After'], '30')
+        self.assertIn('X-Superfilter-Result-Count', response)
 
     @override_settings(SUPERFILTER_MAX_PARALLEL_EXPORTS_PER_NODE=1)
     def test_export_head_cleans_expired_locks(self):
@@ -380,21 +381,18 @@ class SuperfilterExportLockTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['X-Superfilter-Can-Start'], 'true')
+        self.assertEqual(response['X-Superfilter-Retry-After'], '0')
+        self.assertIn('X-Superfilter-Result-Count', response)
         self.assertFalse(SuperFilterExportLock.objects.filter(pk=expired.pk).exists())
 
     @override_settings(SUPERFILTER_MAX_EXPORT_LINES=1234)
-    def test_meta_view_exposes_export_config_and_result_count(self):
+    def test_meta_view_exposes_export_config_without_result_count(self):
         request = self.factory.get('/admin/appagent/operationvin/superfilter/meta/')
         request.user = self.user
 
-        original = self.admin_instance.get_changelist_instance
-        self.admin_instance.get_changelist_instance = lambda _request: SimpleNamespace(result_count=9876)
-        try:
-            response = self.admin_instance.superfilter_meta_view(request)
-        finally:
-            self.admin_instance.get_changelist_instance = original
+        response = self.admin_instance.superfilter_meta_view(request)
 
         payload = json.loads(response.content)
-        self.assertEqual(payload['resultCount'], 9876)
+        self.assertNotIn('resultCount', payload)
         self.assertEqual(payload['exportConfig']['maxLines'], 1234)
 

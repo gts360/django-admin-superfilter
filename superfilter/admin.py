@@ -39,6 +39,7 @@ class SuperFilterChangeList(ChangeList):
         lookup_params = super().get_filters_params(params)
         lookup_params.pop(self.superfilter_param_name, None)
         lookup_params.pop(self.superfilter_columns_param_name, None)
+        lookup_params.pop("_", None)
         return lookup_params
 
 
@@ -294,7 +295,6 @@ class SuperFilterAdminMixin:
     def superfilter_meta_view(self, request):
         fields = self.get_superfilter_fields(request)
         inline_fields = self.get_superfilter_inline_filter_fields(request)
-        result_count = self._get_superfilter_result_count(request) if self.superfilter_export_xlsx else None
         return JsonResponse(
             {
                 "param": self.superfilter_param_name,
@@ -311,7 +311,6 @@ class SuperFilterAdminMixin:
                     "parallelPerNode": self.superfilter_max_parallel_exports_per_node,
                     "lockTimeout": self.superfilter_export_lock_timeout,
                 } if self.superfilter_export_xlsx else None,
-                "resultCount": result_count,
                 "deleteUrlTemplate": "superfilter/delete/__ID__/",
                 "savedFilters": self._get_saved_filters_payload(request),
                 "inlineFilterFields": [
@@ -488,10 +487,19 @@ class SuperFilterAdminMixin:
             return
         SuperFilterExportLock.objects.filter(pk=lock.pk).delete()
 
-    def _build_export_busy_response(self):
+    def _build_export_busy_response(self, result_count=None):
         response = HttpResponse(status=429)
         response['Retry-After'] = '30'
         response['X-Superfilter-Can-Start'] = 'false'
+        response['X-Superfilter-Retry-After'] = '30'
+        if result_count is not None:
+            response['X-Superfilter-Result-Count'] = str(max(0, int(result_count)))
+        return response
+
+    def _set_export_preflight_headers(self, response, result_count):
+        response['X-Superfilter-Can-Start'] = 'true'
+        response['X-Superfilter-Retry-After'] = '0'
+        response['X-Superfilter-Result-Count'] = str(max(0, int(result_count)))
         return response
 
     def export_changelist_xlsx_view(self, request):
@@ -500,15 +508,16 @@ class SuperFilterAdminMixin:
         Supports HEAD preflight on the same URL to check export slot availability.
         """
         if request.method == 'HEAD':
+            result_count = self._get_superfilter_result_count(request)
+            result_count = 0 if result_count is None else result_count
             if self._can_start_export():
                 response = HttpResponse(status=200)
-                response['X-Superfilter-Can-Start'] = 'true'
-                return response
-            return self._build_export_busy_response()
+                return self._set_export_preflight_headers(response, result_count)
+            return self._build_export_busy_response(result_count=result_count)
 
         lock = self._acquire_export_lock(request)
         if lock is None:
-            return self._build_export_busy_response()
+            return self._build_export_busy_response(result_count=0)
 
         try:
             max_lines = max(1, self.superfilter_max_export_lines)

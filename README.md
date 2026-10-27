@@ -186,8 +186,10 @@ Global Django settings for XLSX export throttling/paging:
 - `SUPERFILTER_MAX_EXPORT_LOCK_TIMEOUT = 1800` (seconds)
 
 When export is enabled, the download dialog proposes paged ranges (`1..N`, `N+1..2N`, etc.).
-The last range is trimmed to the remaining rows only. Before each download, the frontend sends
-an HTTP `HEAD` request to the same export URL to check server capacity on the current hostname.
+It also shows `Nombre total de resultats: XXX`, retrieved from an HTTP `HEAD` preflight on the
+same export URL using the current (including unapplied) filter state. The last range is trimmed
+to the remaining rows only. Before each download, the frontend sends the same `HEAD` preflight
+to check server capacity on the current hostname.
 If all slots are used, it waits and polls until a slot is available (or the user cancels/closes the dialog).
 
 Example:

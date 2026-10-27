@@ -239,6 +239,9 @@
     const SAVED_FILTERS_VISIBLE_COUNT = 5;
     const AUTO_APPLY_STORAGE_KEY = "superfilter:autoApply";
     const EXPORT_POLL_INTERVAL_MS = 30000;
+    const PREFLIGHT_RESULT_COUNT_HEADER = "X-Superfilter-Result-Count";
+    const PREFLIGHT_CAN_START_HEADER = "X-Superfilter-Can-Start";
+    const PREFLIGHT_RETRY_AFTER_HEADER = "X-Superfilter-Retry-After";
 
     class SuperFilterUI {
         constructor(meta) {
@@ -641,7 +644,7 @@
               const exportBtn = el("button", { type: "button", class: "superfilter-apply-menu-item"}, "Télécharger");
               exportBtn.addEventListener("click", () => {
                 applyDropdown.style.display = "none";
-                this.openExportDialog();
+                this.openExportDialogWithFreshCount(exportBtn);
               });
               applyDropdown.appendChild(exportBtn);
             } else {
@@ -1437,9 +1440,9 @@
             return Math.floor(configured);
         }
 
-        getExportRanges() {
+        getExportRanges(totalCount) {
             const maxLines = this.getExportMaxLines();
-            const total = Number(this.meta?.resultCount || 0);
+            const total = Number(totalCount || 0);
             if (!Number.isFinite(total) || total <= 0) {
                 return [{ start: 1, end: 0, count: 1, empty: true }];
             }
@@ -1471,10 +1474,118 @@
             return exportUrl;
         }
 
-        openExportDialog() {
-            if (!this.meta.exportXLSXUrl) return;
+        buildExportPreflightUrl() {
+            const exportUrl = this.buildExportUrl({ empty: true });
+            exportUrl.searchParams.delete("p");
+            return exportUrl;
+        }
 
-            const ranges = this.getExportRanges();
+        parsePreflightHeaders(xhr) {
+            if (!xhr) return null;
+            const rawCount = xhr.getResponseHeader(PREFLIGHT_RESULT_COUNT_HEADER);
+            const count = Number(rawCount);
+            if (!Number.isFinite(count) || count < 0) {
+                return null;
+            }
+            const canStart = String(xhr.getResponseHeader(PREFLIGHT_CAN_START_HEADER) || "true").toLowerCase() !== "false";
+            const retryAfter = Number(
+                xhr.getResponseHeader(PREFLIGHT_RETRY_AFTER_HEADER)
+                || xhr.getResponseHeader("Retry-After")
+                || 30
+            );
+            return {
+                totalCount: Math.floor(count),
+                canStart,
+                retryAfter: Math.max(1, Math.floor(retryAfter) || 30),
+            };
+        }
+
+        openExportDialogWithFreshCount(exportBtn) {
+            if (!this.meta.exportXLSXUrl) return;
+            if (exportBtn) exportBtn.disabled = true;
+
+            const preflightUrl = this.buildExportPreflightUrl();
+            let cancelled = false;
+            let preflightRequest = null;
+
+            const overlay = el("div", { class: "superfilter-overlay" });
+            const modal = el("div", { class: "superfilter-modal superfilter-export-modal" });
+            const header = el("div", { class: "superfilter-modal-header" });
+            header.appendChild(el("div", { class: "superfilter-modal-title" }, "Télécharger"));
+            const closeBtn = el("button", { type: "button", class: "superfilter-modal-close", title: "Fermer", "aria-label": "Fermer" });
+            closeBtn.appendChild(iconButtonContent("close", "Fermer"));
+            header.appendChild(closeBtn);
+
+            const body = el("div", { class: "superfilter-modal-body" });
+            body.appendChild(el("div", {}, "Préparation des options d'export..."));
+            const loadingStatus = el("div", { class: "superfilter-export-status", style: "display:inline-flex;" });
+            loadingStatus.appendChild(el("span", { class: "superfilter-spinner", "aria-hidden": "true" }));
+            loadingStatus.appendChild(el("span", {}, "Chargement en cours"));
+            body.appendChild(loadingStatus);
+
+            const footer = el("div", { class: "superfilter-modal-footer" });
+            const cancelBtn = el("button", { type: "button", class: "superfilter-btn" }, "Annuler");
+            footer.appendChild(cancelBtn);
+
+            modal.appendChild(header);
+            modal.appendChild(body);
+            modal.appendChild(footer);
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+
+            const closeLoadingDialog = () => {
+                cancelled = true;
+                if (preflightRequest) {
+                    preflightRequest.abort();
+                    preflightRequest = null;
+                }
+                overlay.remove();
+            };
+
+            closeBtn.addEventListener("click", closeLoadingDialog);
+            cancelBtn.addEventListener("click", closeLoadingDialog);
+            overlay.addEventListener("click", (e) => {
+                if (e.target === overlay) closeLoadingDialog();
+            });
+
+            preflightRequest = $.ajax({
+                url: preflightUrl.href,
+                method: "HEAD",
+            }).done((_data, _statusText, xhr) => {
+                preflightRequest = null;
+                if (cancelled) return;
+                const preflight = this.parsePreflightHeaders(xhr);
+                if (!preflight) {
+                    overlay.remove();
+                    window.alert("Impossible de récupérer le nombre total de résultats pour l'export.");
+                    return;
+                }
+                overlay.remove();
+                this.openExportDialog(preflight);
+            }).fail((xhr, status) => {
+                preflightRequest = null;
+                if (cancelled) return;
+                if (status === "abort") return;
+                const preflight = this.parsePreflightHeaders(xhr);
+                if (preflight) {
+                    overlay.remove();
+                    this.openExportDialog(preflight);
+                    return;
+                }
+                overlay.remove();
+                window.alert("Impossible de récupérer le nombre total de résultats pour l'export.");
+            }).always(() => {
+                if (exportBtn) exportBtn.disabled = false;
+            });
+        }
+
+        openExportDialog(preflight) {
+            if (!this.meta.exportXLSXUrl) return;
+            if (!preflight || !Number.isFinite(preflight.totalCount)) {
+                return;
+            }
+
+            const ranges = this.getExportRanges(preflight.totalCount);
             let selectedIndex = 0;
             let pollTimer = null;
             let pollRequest = null;
@@ -1489,6 +1600,7 @@
             header.appendChild(closeBtn);
 
             const body = el("div", { class: "superfilter-modal-body" });
+            body.appendChild(el("div", {}, `Nombre total de résultats: ${preflight.totalCount}`));
             body.appendChild(el("div", {}, "Choisissez la plage à exporter :"));
             const list = el("div", { class: "superfilter-export-range-list" });
             const statusLine = el("div", { class: "superfilter-export-status", style: "display:none;" });
@@ -1581,11 +1693,10 @@
                 pollRequest = $.ajax({
                     url: exportUrl.href,
                     method: "HEAD",
-                    cache: false,
                 }).done((_data, _statusText, xhr) => {
                     pollRequest = null;
                     if (cancelled) return;
-                    const canStart = String(xhr.getResponseHeader("X-Superfilter-Can-Start") || "true").toLowerCase() !== "false";
+                    const canStart = String(xhr.getResponseHeader(PREFLIGHT_CAN_START_HEADER) || "true").toLowerCase() !== "false";
                     if (canStart) {
                         close();
                         window.location.assign(exportUrl.href);
@@ -1594,7 +1705,7 @@
                     pollRequest = null;
                     if (cancelled || status === "abort") return;
                     if (xhr && xhr.status === 429) {
-                        const retryAfter = Number(xhr.getResponseHeader("Retry-After") || 30);
+                        const retryAfter = Number(xhr.getResponseHeader(PREFLIGHT_RETRY_AFTER_HEADER) || xhr.getResponseHeader("Retry-After") || 30);
                         showBusyStatus(retryAfter);
                         setBusyButtons(true);
                         pollTimer = window.setTimeout(() => {
