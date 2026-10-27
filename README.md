@@ -179,6 +179,17 @@ Operators:
 - `superfilter_page_size = 25`
 - `superfilter_all_limit = 2000`
 
+Global Django settings for XLSX export throttling/paging:
+
+- `SUPERFILTER_MAX_EXPORT_LINES = 5000`
+- `SUPERFILTER_MAX_PARALLEL_EXPORTS_PER_NODE = 5`
+- `SUPERFILTER_MAX_EXPORT_LOCK_TIMEOUT = 1800` (seconds)
+
+When export is enabled, the download dialog proposes paged ranges (`1..N`, `N+1..2N`, etc.).
+The last range is trimmed to the remaining rows only. Before each download, the frontend sends
+an HTTP `HEAD` request to the same export URL to check server capacity on the current hostname.
+If all slots are used, it waits and polls until a slot is available (or the user cancels/closes the dialog).
+
 Example:
 
 ```python

@@ -1,16 +1,21 @@
+from datetime import timedelta
+import logging
+import socket
+import uuid
+
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.admin.templatetags.admin_list import result_headers
 from django.contrib.admin.utils import lookup_field, display_for_field, display_for_value
 from django.contrib.admin.views.main import ChangeList
 from django.core.exceptions import FieldDoesNotExist
-from django.db import models
+from django.db import models, transaction
 from django.http import JsonResponse, HttpResponse
 from django.urls import path
 from django.utils import timezone
 from django.utils.encoding import force_str
 from django.utils.html import strip_tags
 from openpyxl.workbook import Workbook
-import logging
 
 from superfilter.logic import (
     OPERATORS_BY_KIND,
@@ -21,7 +26,7 @@ from superfilter.logic import (
     resolve_model_field,
     serialize_fields,
 )
-from superfilter.models import SavedSuperFilter
+from superfilter.models import SavedSuperFilter, SuperFilterExportLock
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +56,18 @@ class SuperFilterAdminMixin:
     superfilter_all_limit = 2000
 
     superfilter_export_xlsx = True
+
+    @property
+    def superfilter_max_export_lines(self):
+        return int(getattr(settings, 'SUPERFILTER_MAX_EXPORT_LINES', 5000) or 5000)
+
+    @property
+    def superfilter_max_parallel_exports_per_node(self):
+        return int(getattr(settings, 'SUPERFILTER_MAX_PARALLEL_EXPORTS_PER_NODE', 5) or 5)
+
+    @property
+    def superfilter_export_lock_timeout(self):
+        return int(getattr(settings, 'SUPERFILTER_MAX_EXPORT_LOCK_TIMEOUT', 1800) or 1800)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -264,9 +281,20 @@ class SuperFilterAdminMixin:
             ).order_by('-created_at', '-id').values('id', 'name', 'rules', 'columns', 'updated_at', 'created_at')
         )
 
+    def _get_superfilter_result_count(self, request):
+        try:
+            cl = self.get_changelist_instance(request)
+            paginator = getattr(cl, 'paginator', None)
+            if paginator is not None:
+                return int(getattr(paginator, 'count', 0) or 0)
+            return int(getattr(cl, 'result_count', 0) or 0)
+        except Exception:
+            return None
+
     def superfilter_meta_view(self, request):
         fields = self.get_superfilter_fields(request)
         inline_fields = self.get_superfilter_inline_filter_fields(request)
+        result_count = self._get_superfilter_result_count(request) if self.superfilter_export_xlsx else None
         return JsonResponse(
             {
                 "param": self.superfilter_param_name,
@@ -278,6 +306,12 @@ class SuperFilterAdminMixin:
                 "fkOptionsUrl": "superfilter/fk-options/",
                 "saveUrl": "superfilter/save/",
                 "exportXLSXUrl": "superfilter/export-xlsx/" if self.superfilter_export_xlsx else None,
+                "exportConfig": {
+                    "maxLines": self.superfilter_max_export_lines,
+                    "parallelPerNode": self.superfilter_max_parallel_exports_per_node,
+                    "lockTimeout": self.superfilter_export_lock_timeout,
+                } if self.superfilter_export_xlsx else None,
+                "resultCount": result_count,
                 "deleteUrlTemplate": "superfilter/delete/__ID__/",
                 "savedFilters": self._get_saved_filters_payload(request),
                 "inlineFilterFields": [
@@ -412,45 +446,121 @@ class SuperFilterAdminMixin:
             return JsonResponse({'error': 'Filtre introuvable'}, status=404)
         return JsonResponse({'savedFilters': self._get_saved_filters_payload(request)})
 
+    def _get_export_hostname(self):
+        return socket.gethostname() or 'unknown-host'
+
+    def _cleanup_expired_export_locks(self):
+        SuperFilterExportLock.objects.filter(expires_at__lte=timezone.now()).delete()
+
+    def _can_start_export(self):
+        now = timezone.now()
+        hostname = self._get_export_hostname()
+        self._cleanup_expired_export_locks()
+        active_count = SuperFilterExportLock.objects.filter(
+            hostname=hostname,
+            expires_at__gt=now,
+        ).count()
+        return active_count < self.superfilter_max_parallel_exports_per_node
+
+    def _acquire_export_lock(self, request):
+        now = timezone.now()
+        hostname = self._get_export_hostname()
+        timeout_seconds = max(1, self.superfilter_export_lock_timeout)
+        with transaction.atomic():
+            self._cleanup_expired_export_locks()
+            active_qs = SuperFilterExportLock.objects.select_for_update().filter(
+                hostname=hostname,
+                expires_at__gt=now,
+            )
+            if active_qs.count() >= self.superfilter_max_parallel_exports_per_node:
+                return None
+            return SuperFilterExportLock.objects.create(
+                hostname=hostname,
+                token=uuid.uuid4().hex,
+                user=request.user if getattr(request, 'user', None) and request.user.is_authenticated else None,
+                app_label=self.opts.app_label,
+                model_name=self.opts.model_name,
+                expires_at=now + timedelta(seconds=timeout_seconds),
+            )
+
+    def _release_export_lock(self, lock):
+        if lock is None:
+            return
+        SuperFilterExportLock.objects.filter(pk=lock.pk).delete()
+
+    def _build_export_busy_response(self):
+        response = HttpResponse(status=429)
+        response['Retry-After'] = '30'
+        response['X-Superfilter-Can-Start'] = 'false'
+        return response
+
     def export_changelist_xlsx_view(self, request):
         """
-        Export the same admin changelist:
-        - same filters
-        - same search
-        - same ordering
-        - same list_display columns
-        - same admin column titles
+        Export the same admin changelist with paging support.
+        Supports HEAD preflight on the same URL to check export slot availability.
         """
-        self.list_per_page = 5000
-        cl = self.get_changelist_instance(request)
+        if request.method == 'HEAD':
+            if self._can_start_export():
+                response = HttpResponse(status=200)
+                response['X-Superfilter-Can-Start'] = 'true'
+                return response
+            return self._build_export_busy_response()
 
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Changelist"
+        lock = self._acquire_export_lock(request)
+        if lock is None:
+            return self._build_export_busy_response()
 
-        headers = [
-            strip_tags(force_str(header["text"]))
-            for header in result_headers(cl)
-        ]
-        ws.append(headers)
+        try:
+            max_lines = max(1, self.superfilter_max_export_lines)
+            original_list_per_page = getattr(self, 'list_per_page', max_lines)
+            self.list_per_page = max_lines
+            try:
+                cl = self.get_changelist_instance(request)
+            finally:
+                self.list_per_page = original_list_per_page
 
-        for obj in cl.result_list:
-            ws.append([
-                self._excel_value(request, obj, field_name)
-                for field_name in cl.list_display
-            ])
+            paginator = getattr(cl, 'paginator', None)
+            total_rows = int(getattr(paginator, 'count', 0) or getattr(cl, 'result_count', 0) or 0)
+            page_num = int(getattr(cl, 'page_num', 1) or 1)
 
-        response = HttpResponse(
-            content_type=(
-                "application/vnd.openxmlformats-officedocument."
-                "spreadsheetml.sheet"
+            rows = list(getattr(cl, 'result_list', []) or [])
+            if rows and total_rows > 0:
+                page_index = max(page_num - 1, 0)
+                export_start = page_index * max_lines + 1
+                export_end = min(export_start + len(rows) - 1, total_rows)
+            else:
+                export_start = 1
+                export_end = 0
+
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Export"
+
+            headers = [
+                strip_tags(force_str(header["text"]))
+                for header in result_headers(cl)
+            ]
+            ws.append(headers)
+
+            for obj in rows:
+                ws.append([
+                    self._excel_value(request, obj, field_name)
+                    for field_name in cl.list_display
+                ])
+
+            response = HttpResponse(
+                content_type=(
+                    "application/vnd.openxmlformats-officedocument."
+                    "spreadsheetml.sheet"
+                )
             )
-        )
-        response["Content-Disposition"] = (
-            f'attachment; filename="{cl.opts.verbose_name}-export-{timezone.now().isoformat(timespec="minutes")}.xlsx"'
-        )
-        wb.save(response)
-        return response
+            response["Content-Disposition"] = (
+                f'attachment; filename="{cl.opts.verbose_name}-export-{export_start}-{export_end}-{timezone.now().isoformat(timespec="minutes")}.xlsx"'
+            )
+            wb.save(response)
+            return response
+        finally:
+            self._release_export_lock(lock)
 
     def _excel_value(self, request, obj, field_name):
         """

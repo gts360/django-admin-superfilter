@@ -20,3 +20,27 @@ class SavedSuperFilter(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class SuperFilterExportLock(models.Model):
+    hostname = models.CharField(max_length=255, db_index=True)
+    token = models.CharField(max_length=64, unique=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        models.SET_NULL,
+        related_name='superfilter_export_locks',
+        null=True,
+        blank=True,
+    )
+    app_label = models.CharField(max_length=100)
+    model_name = models.CharField(max_length=100)
+    expires_at = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Verrou export superfilter'
+        verbose_name_plural = 'Verrous export superfilter'
+        ordering = ['-created_at', '-id']
+
+    def __str__(self):
+        return f"{self.hostname}:{self.token}"

@@ -238,6 +238,7 @@
     const NO_VALUE_OPERATORS = ["set", "not_set", "true", "false", "empty"];
     const SAVED_FILTERS_VISIBLE_COUNT = 5;
     const AUTO_APPLY_STORAGE_KEY = "superfilter:autoApply";
+    const EXPORT_POLL_INTERVAL_MS = 30000;
 
     class SuperFilterUI {
         constructor(meta) {
@@ -622,7 +623,7 @@
             searchbar.appendChild(badgesContainer);
 
             this.emptyHint = el("span", { class: "superfilter-empty-hint" }, "Aucun filtre");
-            if (this.rules.length === 0) {
+            if (this.rules.length === 0 && !hasInlineQuickInput) {
                 searchbar.appendChild(this.emptyHint);
             }
 
@@ -639,7 +640,8 @@
             if(this.meta.exportXLSXUrl) {
               const exportBtn = el("button", { type: "button", class: "superfilter-apply-menu-item"}, "Télécharger");
               exportBtn.addEventListener("click", () => {
-                this.export();
+                applyDropdown.style.display = "none";
+                this.openExportDialog();
               });
               applyDropdown.appendChild(exportBtn);
             } else {
@@ -1427,6 +1429,197 @@
             });
             exportUrl.searchParams.delete("p");
             window.location.assign(exportUrl.href);
+        }
+
+        getExportMaxLines() {
+            const configured = Number(this.meta?.exportConfig?.maxLines || 5000);
+            if (!Number.isFinite(configured) || configured <= 0) return 5000;
+            return Math.floor(configured);
+        }
+
+        getExportRanges() {
+            const maxLines = this.getExportMaxLines();
+            const total = Number(this.meta?.resultCount || 0);
+            if (!Number.isFinite(total) || total <= 0) {
+                return [{ start: 1, end: 0, count: 1, empty: true }];
+            }
+
+            const ranges = [];
+            let page = 1;
+            for (let start = 1; start <= total; start += maxLines) {
+                const end = Math.min(total, start + maxLines - 1);
+                ranges.push({
+                    start,
+                    end,
+                    count: end - start + 1,
+                    page,
+                });
+                page += 1;
+            }
+            return ranges;
+        }
+
+        buildExportUrl(range) {
+            const currentUrl = new URL(window.location.href);
+            const exportUrl = new URL(joinUrl(getChangeListBasePath(), this.meta.exportXLSXUrl), window.location.origin);
+            currentUrl.searchParams.forEach((value, name) => exportUrl.searchParams.append(name, value));
+            Object.entries(this.getQueryParameters()).forEach(([name, value]) => {
+                exportUrl.searchParams.set(name, value);
+            });
+            exportUrl.searchParams.delete("p");
+            if (!range.empty) exportUrl.searchParams.set("p", String(range.page || 1));
+            return exportUrl;
+        }
+
+        openExportDialog() {
+            if (!this.meta.exportXLSXUrl) return;
+
+            const ranges = this.getExportRanges();
+            let selectedIndex = 0;
+            let pollTimer = null;
+            let pollRequest = null;
+            let cancelled = false;
+
+            const overlay = el("div", { class: "superfilter-overlay" });
+            const modal = el("div", { class: "superfilter-modal superfilter-export-modal" });
+            const header = el("div", { class: "superfilter-modal-header" });
+            header.appendChild(el("div", { class: "superfilter-modal-title" }, "Télécharger"));
+            const closeBtn = el("button", { type: "button", class: "superfilter-modal-close", title: "Fermer", "aria-label": "Fermer" });
+            closeBtn.appendChild(iconButtonContent("close", "Fermer"));
+            header.appendChild(closeBtn);
+
+            const body = el("div", { class: "superfilter-modal-body" });
+            body.appendChild(el("div", {}, "Choisissez la plage à exporter :"));
+            const list = el("div", { class: "superfilter-export-range-list" });
+            const statusLine = el("div", { class: "superfilter-export-status", style: "display:none;" });
+            const spinner = el("span", { class: "superfilter-spinner", "aria-hidden": "true" });
+            const statusText = el("span", { class: "superfilter-export-status-text" }, "Serveur occupé, nouvelle tentative en cours...");
+            statusLine.appendChild(spinner);
+            statusLine.appendChild(statusText);
+
+            ranges.forEach((range, index) => {
+                const row = el("label", { class: "superfilter-export-range-item" });
+                const radio = el("input", {
+                    type: "radio",
+                    name: "superfilter-export-range",
+                    value: String(index),
+                });
+                if (index === 0) radio.checked = true;
+                radio.addEventListener("change", () => {
+                    selectedIndex = index;
+                    hideBusyStatus();
+                });
+                const label = range.empty ? "Aucune ligne (export des en-têtes uniquement)" : `lignes ${range.start} à ${range.end}`;
+                const text = el("span", {}, label);
+                row.appendChild(radio);
+                row.appendChild(text);
+                list.appendChild(row);
+            });
+
+            body.appendChild(list);
+            body.appendChild(statusLine);
+
+            const footer = el("div", { class: "superfilter-modal-footer" });
+            const cancelBtn = el("button", { type: "button", class: "superfilter-btn" }, "Annuler");
+            const startBtn = el("button", { type: "button", class: "superfilter-btn primary" }, "Télécharger");
+            footer.appendChild(cancelBtn);
+            footer.appendChild(startBtn);
+
+            modal.appendChild(header);
+            modal.appendChild(body);
+            modal.appendChild(footer);
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+
+            const clearPolling = () => {
+                cancelled = true;
+                if (pollTimer) {
+                    window.clearTimeout(pollTimer);
+                    pollTimer = null;
+                }
+                if (pollRequest) {
+                    pollRequest.abort();
+                    pollRequest = null;
+                }
+            };
+
+            const close = () => {
+                clearPolling();
+                overlay.remove();
+            };
+
+            const getSelectedRow = () => {
+                const radios = [...list.querySelectorAll("input[name='superfilter-export-range']")];
+                const selected = radios.find((radio) => radio.checked) || radios[0];
+                return selected ? selected.closest(".superfilter-export-range-item") : null;
+            };
+
+            const showBusyStatus = (retryAfterSeconds) => {
+                const retryAfter = Number(retryAfterSeconds || 30);
+                statusText.textContent = `Serveur occupé, nouvelle tentative dans ${retryAfter}s...`;
+                const selectedRow = getSelectedRow();
+                if (selectedRow) selectedRow.appendChild(statusLine);
+                statusLine.style.display = "inline-flex";
+            };
+
+            const hideBusyStatus = () => {
+                statusLine.style.display = "none";
+            };
+
+            const setBusyButtons = (isBusy) => {
+                startBtn.disabled = isBusy;
+                cancelBtn.disabled = false;
+                [...list.querySelectorAll("input[name='superfilter-export-range']")].forEach((input) => {
+                    input.disabled = isBusy;
+                });
+            };
+
+            const pollCanStart = () => {
+                if (cancelled) return;
+                const selectedRange = ranges[selectedIndex] || ranges[0];
+                const exportUrl = this.buildExportUrl(selectedRange);
+                pollRequest = $.ajax({
+                    url: exportUrl.href,
+                    method: "HEAD",
+                    cache: false,
+                }).done((_data, _statusText, xhr) => {
+                    pollRequest = null;
+                    if (cancelled) return;
+                    const canStart = String(xhr.getResponseHeader("X-Superfilter-Can-Start") || "true").toLowerCase() !== "false";
+                    if (canStart) {
+                        close();
+                        window.location.assign(exportUrl.href);
+                    }
+                }).fail((xhr, status) => {
+                    pollRequest = null;
+                    if (cancelled || status === "abort") return;
+                    if (xhr && xhr.status === 429) {
+                        const retryAfter = Number(xhr.getResponseHeader("Retry-After") || 30);
+                        showBusyStatus(retryAfter);
+                        setBusyButtons(true);
+                        pollTimer = window.setTimeout(() => {
+                            pollTimer = null;
+                            pollCanStart();
+                        }, Math.max(1, retryAfter) * 1000 || EXPORT_POLL_INTERVAL_MS);
+                        return;
+                    }
+                    statusText.textContent = "Impossible de démarrer l'export pour le moment.";
+                    statusLine.style.display = "inline-flex";
+                    setBusyButtons(false);
+                });
+            };
+
+            startBtn.addEventListener("click", (e) => {
+                e.preventDefault();
+                cancelled = false;
+                setBusyButtons(true);
+                pollCanStart();
+            });
+            closeBtn.addEventListener("click", close);
+            cancelBtn.addEventListener("click", close);
+            overlay.addEventListener("click", (e) => {
+                if (e.target === overlay) close();
+            });
         }
 
         reset() {

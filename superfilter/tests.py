@@ -1,8 +1,11 @@
 import json
+from datetime import timedelta
+from types import SimpleNamespace
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
-from django.test import RequestFactory, SimpleTestCase, TestCase
+from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
 
 from appagent.models import OperationVIN, TypeZoneOp, Zone
 from superfilter.admin import SuperFilterAdminMixin
@@ -15,7 +18,7 @@ from superfilter.logic import (
     resolve_model_field,
     serialize_fields,
 )
-from superfilter.models import SavedSuperFilter
+from superfilter.models import SavedSuperFilter, SuperFilterExportLock
 from appagent.admin import PassagesFictifField
 
 
@@ -331,3 +334,67 @@ class SuperfilterSavedFilterTests(TestCase):
         request = self.factory.get('/admin/appagent/operationvin/')
         request.user = self.user
         self.assertEqual(self.admin_instance.get_list_display(request), ('agent_affecte__carlog_employe_nom', 'VIN'))
+
+
+class SuperfilterExportLockTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.user = get_user_model().objects.create_user(username='exportuser', password='testpass')
+        self.admin_instance = _DummySuperfilterAdmin(OperationVIN, admin.site)
+
+    @override_settings(SUPERFILTER_MAX_PARALLEL_EXPORTS_PER_NODE=1)
+    def test_export_head_returns_429_when_slot_is_full(self):
+        request = self.factory.head('/admin/appagent/operationvin/superfilter/export-xlsx/')
+        request.user = self.user
+
+        SuperFilterExportLock.objects.create(
+            hostname=self.admin_instance._get_export_hostname(),
+            token='busy-token',
+            user=self.user,
+            app_label='appagent',
+            model_name='operationvin',
+            expires_at=timezone.now() + timedelta(minutes=10),
+        )
+
+        response = self.admin_instance.export_changelist_xlsx_view(request)
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response['X-Superfilter-Can-Start'], 'false')
+        self.assertEqual(response['Retry-After'], '30')
+
+    @override_settings(SUPERFILTER_MAX_PARALLEL_EXPORTS_PER_NODE=1)
+    def test_export_head_cleans_expired_locks(self):
+        request = self.factory.head('/admin/appagent/operationvin/superfilter/export-xlsx/')
+        request.user = self.user
+
+        expired = SuperFilterExportLock.objects.create(
+            hostname=self.admin_instance._get_export_hostname(),
+            token='expired-token',
+            user=self.user,
+            app_label='appagent',
+            model_name='operationvin',
+            expires_at=timezone.now() - timedelta(minutes=1),
+        )
+
+        response = self.admin_instance.export_changelist_xlsx_view(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['X-Superfilter-Can-Start'], 'true')
+        self.assertFalse(SuperFilterExportLock.objects.filter(pk=expired.pk).exists())
+
+    @override_settings(SUPERFILTER_MAX_EXPORT_LINES=1234)
+    def test_meta_view_exposes_export_config_and_result_count(self):
+        request = self.factory.get('/admin/appagent/operationvin/superfilter/meta/')
+        request.user = self.user
+
+        original = self.admin_instance.get_changelist_instance
+        self.admin_instance.get_changelist_instance = lambda _request: SimpleNamespace(result_count=9876)
+        try:
+            response = self.admin_instance.superfilter_meta_view(request)
+        finally:
+            self.admin_instance.get_changelist_instance = original
+
+        payload = json.loads(response.content)
+        self.assertEqual(payload['resultCount'], 9876)
+        self.assertEqual(payload['exportConfig']['maxLines'], 1234)
+

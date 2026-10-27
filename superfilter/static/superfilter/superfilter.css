@@ -975,3 +975,47 @@ textarea.superfilter-input {
     width: 0.9rem;
     height: 0.9rem;
 }
+
+.superfilter-export-range-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.superfilter-export-range-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+    cursor: pointer;
+}
+
+.superfilter-export-range-item:has(input:checked) {
+    border-color: #0d6efd;
+    background: #f3f8ff;
+}
+
+.superfilter-export-status {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: #6c757d;
+    font-size: 0.82rem;
+}
+
+.superfilter-spinner {
+    width: 0.85rem;
+    height: 0.85rem;
+    border-radius: 999px;
+    border: 2px solid #d0d7de;
+    border-top-color: #0d6efd;
+    animation: superfilterSpin 0.8s linear infinite;
+}
+
+@keyframes superfilterSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
