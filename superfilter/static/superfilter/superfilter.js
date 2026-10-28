@@ -1477,6 +1477,7 @@
         buildExportPreflightUrl() {
             const exportUrl = this.buildExportUrl({ empty: true });
             exportUrl.searchParams.delete("p");
+            exportUrl.searchParams.set("dryrun", "1");
             return exportUrl;
         }
 
@@ -1690,8 +1691,10 @@
                 if (cancelled) return;
                 const selectedRange = ranges[selectedIndex] || ranges[0];
                 const exportUrl = this.buildExportUrl(selectedRange);
+                const preflightUrl = new URL(exportUrl.href);
+                preflightUrl.searchParams.set("dryrun", "1");
                 pollRequest = $.ajax({
-                    url: exportUrl.href,
+                    url: preflightUrl.href,
                     method: "HEAD",
                 }).done((_data, _statusText, xhr) => {
                     pollRequest = null;

@@ -40,6 +40,7 @@ class SuperFilterChangeList(ChangeList):
         lookup_params.pop(self.superfilter_param_name, None)
         lookup_params.pop(self.superfilter_columns_param_name, None)
         lookup_params.pop("_", None)
+        lookup_params.pop("dryrun", None)
         return lookup_params
 
 
@@ -507,7 +508,8 @@ class SuperFilterAdminMixin:
         Export the same admin changelist with paging support.
         Supports HEAD preflight on the same URL to check export slot availability.
         """
-        if request.method == 'HEAD':
+        is_preflight = request.method == 'HEAD' or request.GET.get('dryrun') == '1'
+        if is_preflight:
             result_count = self._get_superfilter_result_count(request)
             result_count = 0 if result_count is None else result_count
             if self._can_start_export():

@@ -396,3 +396,14 @@ class SuperfilterExportLockTests(TestCase):
         self.assertNotIn('resultCount', payload)
         self.assertEqual(payload['exportConfig']['maxLines'], 1234)
 
+    def test_export_get_with_dryrun_behaves_like_head_preflight(self):
+        request = self.factory.get('/admin/appagent/operationvin/superfilter/export-xlsx/', {'dryrun': '1'})
+        request.user = self.user
+
+        response = self.admin_instance.export_changelist_xlsx_view(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['X-Superfilter-Can-Start'], 'true')
+        self.assertEqual(response['X-Superfilter-Retry-After'], '0')
+        self.assertIn('X-Superfilter-Result-Count', response)
+

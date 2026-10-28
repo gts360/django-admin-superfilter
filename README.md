@@ -189,7 +189,8 @@ When export is enabled, the download dialog proposes paged ranges (`1..N`, `N+1.
 It also shows `Nombre total de resultats: XXX`, retrieved from an HTTP `HEAD` preflight on the
 same export URL using the current (including unapplied) filter state. The last range is trimmed
 to the remaining rows only. Before each download, the frontend sends the same `HEAD` preflight
-to check server capacity on the current hostname.
+to check server capacity on the current hostname. For deployments that rewrite `HEAD` to `GET`,
+the preflight also sends `dryrun=1` so the backend keeps preflight behavior.
 If all slots are used, it waits and polls until a slot is available (or the user cancels/closes the dialog).
 
 Example:
